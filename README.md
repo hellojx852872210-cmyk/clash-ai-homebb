@@ -88,6 +88,10 @@ launchd/ install.sh uninstall.sh
 tests/                  pytest
 ```
 
+## 参与开发
+
+分支、PR、CI、发布与回滚流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 ## License
 
 MIT
