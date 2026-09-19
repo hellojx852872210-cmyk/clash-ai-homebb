@@ -141,3 +141,77 @@ class EditTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MenuTest(unittest.TestCase):
+    """用 mock 喂输入走菜单：返回 / 确认 / 编号删除 / 不保存退出 / 中断。"""
+
+    def run_menu(self, inputs, spec_path=None):
+        from unittest import mock
+        import wizard
+        p = spec_path or Path(tempfile.mkdtemp()) / "deadchain.toml"
+        with mock.patch("builtins.input", side_effect=list(inputs)):
+            rc = wizard.menu(p, Path(tempfile.mkdtemp()) / "out")
+        return rc, p
+
+    def test_add_confirm_and_save(self):
+        rc, p = self.run_menu(["1", "203.0.113.5:1080:u:p", "socks5", "家宽A", "y", "0"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(load_spec(p)["homebb"]["nodes"][0]["name"], "家宽A")
+
+    def test_add_then_decline_confirm_adds_nothing(self):
+        rc, p = self.run_menu(["1", "203.0.113.5:1080", "socks5", "x", "n", "0"])
+        self.assertEqual(load_spec(p)["homebb"]["nodes"], [])
+
+    def test_back_from_any_prompt(self):
+        rc, p = self.run_menu(["1", "b", "3", "机场A", "b", "4", "0"])  # 4: 没有节点直接返回
+        self.assertEqual(rc, 0)
+        s = load_spec(p)
+        self.assertEqual((s["homebb"]["nodes"], s["daily"]["subscriptions"]), ([], []))
+
+    def test_delete_by_number_with_confirm(self):
+        rc, p = self.run_menu([
+            "3", "机场A", "https://a/sub", "3", "机场B", "https://b/sub",
+            "6", "1", "n",          # 选 1 但不确认
+            "6", "机场B", "y",       # 按名字删
+            "0",
+        ])
+        self.assertEqual([x["name"] for x in load_spec(p)["daily"]["subscriptions"]], ["机场A"])
+
+    def test_quit_without_saving_requires_confirm_when_dirty(self):
+        p = Path(tempfile.mkdtemp()) / "deadchain.toml"
+        rc, _ = self.run_menu(["3", "机场A", "https://a/sub", "q", "n", "q", "y"], p)
+        self.assertEqual(rc, 0)
+        self.assertFalse(p.exists())
+
+    def test_interrupt_does_not_write(self):
+        p = Path(tempfile.mkdtemp()) / "deadchain.toml"
+        rc, _ = self.run_menu(["3", "机场A", "https://a/sub", KeyboardInterrupt()], p)
+        self.assertEqual(rc, 1)
+        self.assertFalse(p.exists())
+
+    def test_generate_writes_outputs(self):
+        out = Path(tempfile.mkdtemp()) / "out"
+        from unittest import mock
+        import wizard
+        p = Path(tempfile.mkdtemp()) / "deadchain.toml"
+        with mock.patch("builtins.input", side_effect=["1", "203.0.113.5:1080:u:p", "socks5", "A", "y", "3", "机场A", "https://a/sub", "9", "q"]):
+            rc = wizard.menu(p, out)
+        self.assertEqual(rc, 0)
+        self.assertTrue((out / "Merge.yaml").exists())
+        self.assertTrue((out / "INSTALL.md").exists())
+
+
+class PickTest(unittest.TestCase):
+    def test_pick_by_number_name_and_back(self):
+        from unittest import mock
+        import wizard
+        with mock.patch("builtins.input", side_effect=["2"]):
+            self.assertEqual(wizard._pick(["a", "b"], "x"), 1)
+        with mock.patch("builtins.input", side_effect=["9", "b"]):
+            with self.assertRaises(wizard.Back):
+                wizard._pick(["a", "b"], "x")
+        with mock.patch("builtins.input", side_effect=["a"]):
+            self.assertEqual(wizard._pick(["a", "b"], "x"), 0)
+        with self.assertRaises(wizard.Back):
+            wizard._pick([], "x")

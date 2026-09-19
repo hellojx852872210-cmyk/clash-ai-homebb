@@ -59,6 +59,18 @@ python3 wizard.py generate            # 只写到 generated/；加 --install --y
 
 改了 `deadchain.toml` 就重新生成；生成器默认只写到 `generated/`，加 `--install --yes` 才会覆盖 Verge 里的 Merge / Script（原文件备份）。
 
+## 本地验收
+
+改了向导或生成器之后，不必碰真实配置就能完整过一遍：
+
+```bash
+./scripts/acceptance.sh          # 单元测试 → 命令行增删生成 → mihomo -t → 交互菜单逐项验证 → 最终状态
+./scripts/acceptance.sh --auto   # 只跑自动部分
+```
+
+全程使用临时目录里的 `deadchain.toml` 和输出目录（通过环境变量 `CLASH_AI_HOMEBB_SPEC` 和 `--out` 隔离），
+你的 `deadchain.toml`、`generated/`、Clash 配置、launchd 任务都不会被改。
+
 ## 日常操作
 
 ```bash

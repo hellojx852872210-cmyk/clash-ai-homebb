@@ -279,85 +279,169 @@ def remove_daily(spec: dict, name: str) -> bool:
 def describe(spec: dict) -> str:
     out: list[str] = []
     hb = spec["homebb"]
-    out.append("家宽节点：" + (", ".join(f"{n['name']}({n['type']} {n['server']}:{n['port']})" for n in hb["nodes"]) or "（无）"))
+    out.append("家宽节点：" + ("  ".join(f"{i}. {n['name']}({n['type']} {n['server']}:{n['port']})" for i, n in enumerate(hb["nodes"], 1)) or "（无）"))
     sub = hb.get("subscription")
     out.append("家宽订阅：" + (sub.get("url") or sub.get("file") if sub else "（无）"))
     subs = spec["daily"]["subscriptions"]
-    out.append("日常订阅：" + (", ".join(f"{s['name']}({'url' if s.get('url') else 'file'})" for s in subs) or "（无）"))
+    out.append("日常订阅：" + ("  ".join(f"{i}. {x['name']}({'url' if x.get('url') else 'file'})" for i, x in enumerate(subs, 1)) or "（无）"))
     out.append(f"直连 IP：{spec['direct'].get('ips') or '（无）'}   DNS 随家宽：{spec['dns'].get('via_homebb', True)}   家宽口：127.0.0.1:{hb.get('listener_port', 7901)}")
     return "\n".join(out)
 
 
-def generate(spec_path: Path, install: bool = False, yes: bool = False) -> int:
+def generate(spec_path: Path, install: bool = False, yes: bool = False, out: Path | None = None) -> int:
     sys.path.insert(0, str(HERE))
     import genconfig  # noqa: E402
 
-    argv = [str(spec_path), "--out", str(HERE / "generated")]
+    argv = [str(spec_path), "--out", str(out or HERE / "generated")]
     if install:
         argv += ["--install"] + (["--yes"] if yes else [])
     return genconfig.main(argv)
 
 
 # ---------------- 菜单 ----------------
-def _ask(prompt: str, default: str = "") -> str:
-    s = input(f"{prompt}{f' [{default}]' if default else ''}: ").strip()
-    return s or default
+class Back(Exception):
+    """用户在任意提示处输入 b：放弃当前操作，回主菜单。"""
 
 
-def menu() -> int:
-    spec = load_spec()
-    print(f"配置文件：{SPEC_PATH}\n")
+BACK_WORDS = ("b", "back", "返回")
+
+
+def _ask(prompt: str, default: str = "", required: bool = False) -> str:
     while True:
-        print(describe(spec))
-        print("\n 1) 添加家宽节点（粘贴 socks5:// vless:// trojan:// ss:// vmess:// hysteria2:// 链接，或 host:port:user:pass）")
-        print(" 2) 设置家宽订阅（URL 或本地 yaml）      3) 添加日常订阅（名字 + URL/本地 yaml）")
-        print(" 4) 删除家宽节点        5) 删除家宽订阅        6) 删除日常订阅")
-        print(" 7) 设置直连 IP（自家 SSH 机器）          8) DNS 是否随家宽 fail-closed")
-        print(" 9) 生成配置到 generated/                10) 生成并安装到 Clash Verge（会备份原文件）")
-        print(" 0) 保存并退出")
-        c = _ask("选择")
+        s = input(f"{prompt}{f' [{default}]' if default else ''}（b 返回）: ").strip()
+        if s.lower() in BACK_WORDS:
+            raise Back
+        if not s:
+            s = default
+        if s or not required:
+            return s
+        print("  不能为空")
+
+
+def _confirm(prompt: str, default_yes: bool = True) -> bool:
+    s = _ask(f"{prompt} {'Y/n' if default_yes else 'y/N'}", "y" if default_yes else "n")
+    return s.lower().startswith("y")
+
+
+def _pick(items: list[str], what: str) -> int:
+    """按编号或名字选一项，返回下标；列表为空直接 Back。"""
+    if not items:
+        print(f"  没有可选的{what}")
+        raise Back
+    for i, name in enumerate(items, 1):
+        print(f"  {i}. {name}")
+    while True:
+        s = _ask(f"选择{what}（编号或名字）", required=True)
+        if s.isdigit() and 1 <= int(s) <= len(items):
+            return int(s) - 1
+        if s in items:
+            return items.index(s)
+        print("  没有这一项")
+
+
+def _menu_text(spec: dict, dirty: bool) -> str:
+    hb = spec["homebb"]
+    lines = [describe(spec), ""]
+    lines.append(" 1) 添加家宽节点      2) 设置家宽订阅      3) 添加日常订阅")
+    lines.append(" 4) 删除家宽节点      5) 删除家宽订阅      6) 删除日常订阅")
+    lines.append(" 7) 直连 IP           8) DNS 随家宽        9) 生成到 generated/    10) 生成并安装到 Clash Verge")
+    lines.append(" s) 保存              0) 保存并退出        q) 不保存退出           （任何提示处输入 b 返回）")
+    if dirty:
+        lines.append(" * 有未保存的改动")
+    return "\n".join(lines)
+
+
+def menu(spec_path: Path = SPEC_PATH, out_dir: Path | None = None) -> int:
+    spec = load_spec(spec_path)
+    dirty = False
+    print(f"配置文件：{spec_path}\n")
+    while True:
+        print(_menu_text(spec, dirty))
         try:
+            c = _ask("选择", required=True).lower()
             if c == "1":
-                raw = _ask("节点")
-                if not raw:
-                    continue
-                http = raw.count(":") == 3 and _ask("简写格式：socks5 还是 http", "socks5") == "http"
-                node = parse_node(raw, default_name=_ask("名字", f"home-{len(spec['homebb']['nodes']) + 1}"), prefer_http=http)
-                add_home_node(spec, node)
-                print(f"已添加 {node['name']}")
+                raw = _ask("粘贴节点（socks5:// vless:// trojan:// ss:// vmess:// hysteria2:// 链接，或 host:port[:user:pass]，或 JSON）", required=True)
+                http = raw.count(":") in (1, 3) and "://" not in raw and _ask("简写格式当作 socks5 还是 http", "socks5") == "http"
+                node = parse_node(raw, default_name=f"home-{len(spec['homebb']['nodes']) + 1}", prefer_http=http)
+                node["name"] = _ask("名字", node["name"], required=True)
+                print(f"  → {node['name']}: {node['type']} {node['server']}:{node['port']}")
+                if _confirm("确认添加"):
+                    add_home_node(spec, node)
+                    dirty = True
+                    print(f"已添加 {node['name']}")
             elif c == "2":
-                src = _ask("家宽订阅 URL 或文件路径")
-                if src:
-                    set_home_sub(spec, src)
+                cur = spec["homebb"].get("subscription") or {}
+                src = _ask("家宽订阅 URL 或本地 yaml 路径", cur.get("url") or cur.get("file") or "", required=True)
+                set_home_sub(spec, src)
+                dirty = True
+                print("已设置家宽订阅")
             elif c == "3":
-                name = _ask("订阅名字（英文/中文都行，不要空格）")
-                src = _ask("URL 或本地 yaml 路径")
-                if name and src:
-                    add_daily(spec, name, src)
+                name = _ask("订阅名字（不要空格）", required=True)
+                if any(x.get("name") == name for x in spec["daily"]["subscriptions"]) and not _confirm(f"{name} 已存在，覆盖", False):
+                    raise Back
+                src = _ask("URL 或本地 yaml 路径", required=True)
+                add_daily(spec, name, src)
+                dirty = True
+                print(f"已添加日常订阅 {name}")
             elif c == "4":
-                print("已删除" if remove_home_node(spec, _ask("节点名字")) else "没有这个节点")
+                names = [n["name"] for n in spec["homebb"]["nodes"]]
+                name = names[_pick(names, "家宽节点")]
+                if _confirm(f"确认删除 {name}", False):
+                    remove_home_node(spec, name)
+                    dirty = True
+                    print("已删除")
             elif c == "5":
-                print("已删除" if clear_home_sub(spec) else "本来就没有")
+                if not spec["homebb"].get("subscription"):
+                    print("本来就没有家宽订阅")
+                elif _confirm("确认删除家宽订阅", False):
+                    clear_home_sub(spec)
+                    dirty = True
+                    print("已删除")
             elif c == "6":
-                print("已删除" if remove_daily(spec, _ask("订阅名字")) else "没有这个订阅")
+                names = [x["name"] for x in spec["daily"]["subscriptions"]]
+                name = names[_pick(names, "日常订阅")]
+                if _confirm(f"确认删除 {name}", False):
+                    remove_daily(spec, name)
+                    dirty = True
+                    print("已删除")
             elif c == "7":
-                spec["direct"]["ips"] = [x.strip() for x in _ask("IP 列表，逗号分隔（留空清空）").split(",") if x.strip()]
+                cur = ", ".join(spec["direct"].get("ips") or [])
+                s = _ask("必须直连的 IP，逗号分隔（输入 - 清空）", cur)
+                spec["direct"]["ips"] = [] if s == "-" else [x.strip() for x in s.split(",") if x.strip()]
+                dirty = True
             elif c == "8":
-                spec["dns"]["via_homebb"] = _ask("DNS 走家宽（家宽挂了 DNS 一起断）y/n", "y").lower().startswith("y")
+                spec["dns"]["via_homebb"] = _confirm("用户 DNS 走家宽（家宽挂了 DNS 一起断）", spec["dns"].get("via_homebb", True))
+                dirty = True
             elif c in ("9", "10"):
-                save_spec(spec)
                 if c == "10":
-                    if _ask("会覆盖 Clash Verge 里的 Merge.yaml / Script.js（自动备份）。输入 yes 确认") != "yes":
-                        continue
-                    print("提示：如果之前 --pin 上过锁，先 python3 watch.py --unpin")
-                rc = generate(SPEC_PATH, install=(c == "10"), yes=True)
-                print("完成" if rc == 0 else f"失败（exit {rc}）")
+                    print("将覆盖 Clash Verge 里的 Merge.yaml / Script.js（自动备份）。若之前 --pin 上过锁，先 python3 watch.py --unpin。")
+                    if _ask("输入 yes 确认", required=True) != "yes":
+                        raise Back
+                save_spec(spec, spec_path)
+                dirty = False
+                rc = generate(spec_path, install=(c == "10"), yes=True, out=out_dir)
+                print("完成，看 generated/INSTALL.md" if rc == 0 else f"失败（exit {rc}）")
+            elif c == "s":
+                save_spec(spec, spec_path)
+                dirty = False
+                print(f"已保存 {spec_path}")
             elif c == "0":
-                save_spec(spec)
-                print(f"已保存 {SPEC_PATH}")
+                save_spec(spec, spec_path)
+                print(f"已保存 {spec_path}")
                 return 0
+            elif c == "q":
+                if not dirty or _confirm("有未保存的改动，确定不保存退出", False):
+                    print("未保存，已退出")
+                    return 0
+            else:
+                print("没有这个选项")
+        except Back:
+            print("已返回")
         except (ValueError, KeyError, json.JSONDecodeError) as e:
             print(f"出错：{e}")
+        except (KeyboardInterrupt, EOFError):
+            print("\n已中断" + ("，未保存的改动没有写入" if dirty else ""))
+            return 1
         print()
 
 
@@ -372,10 +456,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("remove-home-sub")
     sub.add_parser("remove-daily").add_argument("name")
     sub.add_parser("list")
-    p = sub.add_parser("generate"); p.add_argument("--install", action="store_true"); p.add_argument("--yes", action="store_true")
+    p = sub.add_parser("generate"); p.add_argument("--install", action="store_true"); p.add_argument("--yes", action="store_true"); p.add_argument("--out", default="")
+    ap.add_argument("--out", default="", help="菜单模式下生成目录（默认 generated/）")
     a = ap.parse_args(argv)
     if not a.cmd:
-        return menu()
+        return menu(SPEC_PATH, Path(a.out) if a.out else None)
     spec = load_spec()
     try:
         if a.cmd == "add-home":
@@ -398,7 +483,7 @@ def main(argv: list[str] | None = None) -> int:
             print(describe(spec)); return 0
         elif a.cmd == "generate":
             save_spec(spec)
-            return generate(SPEC_PATH, install=a.install, yes=a.yes)
+            return generate(SPEC_PATH, install=a.install, yes=a.yes, out=Path(a.out) if a.out else None)
     except (ValueError, json.JSONDecodeError) as e:
         print(f"出错：{e}", file=sys.stderr); return 2
     save_spec(spec)
