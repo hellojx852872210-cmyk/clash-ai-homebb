@@ -44,6 +44,7 @@ CODE_CN = {
     "leak_homebb_is_daily": "家宽口的出口等于日常出口，死链失效",
     "leak_ai_via_daily": "AI 域名经日常口走通了，链路里没有 AI 组",
     "clash_dead": "mihomo 控制器连不上",
+    "core_reloading": "内核正在重载（控制器暂时没有返回 AI 组），下一轮再看",
     "deadchain_broken": "死链结构被改（AI 组 / 家宽组不是预期形态）",
     "config_tampered": "上锁的配置被改或锁标记丢了",
     "direct_route_missing": "自家机直连的 TUN exclude / 网卡路由丢了",
@@ -55,6 +56,7 @@ CODE_SHORT = {
     "leak_homebb_is_daily": "泄漏！家宽口出口=日常出口",
     "leak_ai_via_daily": "泄漏！AI 走了日常出口",
     "clash_dead": "mihomo 挂了",
+    "core_reloading": "内核重载中",
     "deadchain_broken": "死链结构被改",
     "config_tampered": "配置被改/锁标记丢",
     "direct_route_missing": "自家机直连路由丢",
@@ -151,6 +153,9 @@ def evaluate(snapshot: Snapshot, policy: Policy | None = None) -> Result:
         return Result("clash_dead", "crit")
     if not snapshot.lock_ok:
         return Result("config_tampered", "crit", snapshot.lock_detail)
+    if not snapshot.ai_group_type and not snapshot.ai_group_all:
+        # 组整个不在：多半是 Verge 切换配置档 / 重新生成时内核正在重载，不是被改
+        return Result("core_reloading", "warn", f"{p.ai_group} 不在控制器返回的组表里")
     if snapshot.daily_ip and snapshot.homebb_ip and snapshot.daily_ip == snapshot.homebb_ip:
         return Result("leak_homebb_is_daily", "crit", f"两侧都是 {snapshot.daily_ip}")
     if snapshot.ai_via_daily == "ok" and (not snapshot.ai_chain or p.ai_group not in snapshot.ai_chain):

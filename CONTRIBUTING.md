@@ -25,7 +25,7 @@
 
 - `.github/workflows/test.yml`：每个 push / PR 在 macOS 上跑 `pytest` 和生成器冒烟（用 `examples/deadchain.sample.toml` 生成一遍）。
 - `main` 开了分支保护：`pytest` 检查不通过不能合并；分支必须与 `main` 同步。
-- 本地先跑：`python3 -m pytest -q`。
+- 本地先跑：`python3 -m pytest -q`（没装 pytest 就 `python3 -m unittest discover -s tests`）。
 
 ## 5. 发布（CD）
 

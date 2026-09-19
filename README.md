@@ -29,8 +29,14 @@ Claude / ChatGPT / Grok 这类服务对出口 IP 很敏感，机房 IP 容易被
 
 ```bash
 git clone https://github.com/hellojx852872210-cmyk/clash-ai-homebb && cd clash-ai-homebb
-cp deadchain.example.toml deadchain.toml   # 填你的家宽节点/订阅、日常订阅
-python3 genconfig.py deadchain.toml --out generated/
+python3 start.py                            # 检测环境 → 引导添加家宽/订阅 → 生成 → 安装 → 验证 → 上锁 → 装 launchd
+```
+
+`start.py` 先检测系统、Python、curl、Clash Verge 是否安装、内核是否在跑、TUN/系统代理、端口、是否已装过、是否上锁、launchd 等，打印一份报告，
+再按缺什么补什么一步步带你做，每步可跳过；`python3 start.py --check` 只检测不改动，提问题时把报告贴出来。手动等价步骤：
+
+```bash
+python3 wizard.py                            # 交互式引导：添加家宽节点/订阅、日常订阅，生成配置
 cat generated/INSTALL.md                    # 按步骤把 Merge/Script/providers 放进 Clash Verge
 cp generated/config.toml .                  # 监控用的配置
 python3 watch.py                            # 看一轮结果，应为「正常」
@@ -38,13 +44,39 @@ python3 watch.py --pin                      # 上锁
 ./install.sh                                # 装 launchd：监控 + 悬浮窗
 ```
 
-`deadchain.toml` 里可以写：
+引导里粘贴节点就行，支持 `socks5://`、`http://`、`vless://`、`trojan://`、`ss://`、`vmess://`、`hysteria2://` 分享链接，
+住宅代理常见的 `host:port:user:pass` 简写，以及 JSON 节点。之后随时增删，不用进菜单：
+
+```bash
+python3 wizard.py add-home  'socks5://user:pass@203.0.113.5:1080#家宽A'
+python3 wizard.py add-home  '203.0.113.5:1080:user:pass'
+python3 wizard.py add-home-sub  https://home.example/sub?type=clash
+python3 wizard.py add-daily 机场A https://a.example/sub?target=clash
+python3 wizard.py add-daily 机场B ~/Downloads/b.yaml
+python3 wizard.py remove-daily 机场A
+python3 wizard.py list
+python3 wizard.py generate            # 只写到 generated/；加 --install --yes 才装进 Clash Verge
+```
+
+不想用引导也可以直接改 `deadchain.toml`（示例见 `deadchain.example.toml`）再 `python3 genconfig.py deadchain.toml --out generated/`。里面可以写：
 
 - **家宽入口**：直接写 mihomo 节点（socks5 / http / vless / trojan / ss / hysteria2 … 任意类型，多个按顺序 fallback），或给一份家宽订阅（URL / 本地文件），两者可并存；
 - **日常订阅**：多份，URL 型由 mihomo 自动更新，文件型复制进去；
 - **AI 域名 / 进程**、**必须直连的自家机 IP**、**DNS 是否随家宽 fail-closed**。
 
 改了 `deadchain.toml` 就重新生成；生成器默认只写到 `generated/`，加 `--install --yes` 才会覆盖 Verge 里的 Merge / Script（原文件备份）。
+
+## 本地验收
+
+改了向导或生成器之后，不必碰真实配置就能完整过一遍：
+
+```bash
+./scripts/acceptance.sh          # 单元测试 → 命令行增删生成 → mihomo -t → 交互菜单逐项验证 → 最终状态
+./scripts/acceptance.sh --auto   # 只跑自动部分
+```
+
+全程使用临时目录里的 `deadchain.toml` 和输出目录（通过环境变量 `CLASH_AI_HOMEBB_SPEC` 和 `--out` 隔离），
+你的 `deadchain.toml`、`generated/`、Clash 配置、launchd 任务都不会被改。
 
 ## 日常操作
 
@@ -76,6 +108,8 @@ python3 watch.py --unpin        # 解锁 → 改配置 → 重新生成/粘贴 �
 ## 目录
 
 ```
+start.py                环境检测 + 全程引导（第一次运行这个）
+wizard.py                增删家宽与订阅（菜单 / 命令行）
 genconfig.py            生成 Merge.yaml / Script.js / providers / config.toml
 deadchain.example.toml  生成器输入示例
 templates/Script.js.tpl Script 模板

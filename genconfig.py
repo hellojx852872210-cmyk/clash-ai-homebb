@@ -266,6 +266,11 @@ def install(out: Path, verge: Path, project: Path) -> None:
     prof = verge / "profiles"
     if not prof.is_dir():
         raise SpecError(f"Verge 目录不对：{prof} 不存在")
+    import stat as _stat
+    for name in ("Merge.yaml", "Script.js"):
+        dst = prof / name
+        if dst.exists() and getattr(dst.stat(), "st_flags", 0) & getattr(_stat, "UF_IMMUTABLE", 0):
+            raise SpecError(f"{dst} 已被 uchg 锁住，先 python3 watch.py --unpin 再安装，装完 --pin")
     for name in ("Merge.yaml", "Script.js"):
         dst = prof / name
         if dst.exists():
