@@ -29,8 +29,7 @@ Claude / ChatGPT / Grok 这类服务对出口 IP 很敏感，机房 IP 容易被
 
 ```bash
 git clone https://github.com/hellojx852872210-cmyk/clash-ai-homebb && cd clash-ai-homebb
-cp deadchain.example.toml deadchain.toml   # 填你的家宽节点/订阅、日常订阅
-python3 genconfig.py deadchain.toml --out generated/
+python3 wizard.py                            # 交互式引导：添加家宽节点/订阅、日常订阅，生成配置
 cat generated/INSTALL.md                    # 按步骤把 Merge/Script/providers 放进 Clash Verge
 cp generated/config.toml .                  # 监控用的配置
 python3 watch.py                            # 看一轮结果，应为「正常」
@@ -38,7 +37,21 @@ python3 watch.py --pin                      # 上锁
 ./install.sh                                # 装 launchd：监控 + 悬浮窗
 ```
 
-`deadchain.toml` 里可以写：
+引导里粘贴节点就行，支持 `socks5://`、`http://`、`vless://`、`trojan://`、`ss://`、`vmess://`、`hysteria2://` 分享链接，
+住宅代理常见的 `host:port:user:pass` 简写，以及 JSON 节点。之后随时增删，不用进菜单：
+
+```bash
+python3 wizard.py add-home  'socks5://user:pass@203.0.113.5:1080#家宽A'
+python3 wizard.py add-home  '203.0.113.5:1080:user:pass'
+python3 wizard.py add-home-sub  https://home.example/sub?type=clash
+python3 wizard.py add-daily 机场A https://a.example/sub?target=clash
+python3 wizard.py add-daily 机场B ~/Downloads/b.yaml
+python3 wizard.py remove-daily 机场A
+python3 wizard.py list
+python3 wizard.py generate            # 只写到 generated/；加 --install --yes 才装进 Clash Verge
+```
+
+不想用引导也可以直接改 `deadchain.toml`（示例见 `deadchain.example.toml`）再 `python3 genconfig.py deadchain.toml --out generated/`。里面可以写：
 
 - **家宽入口**：直接写 mihomo 节点（socks5 / http / vless / trojan / ss / hysteria2 … 任意类型，多个按顺序 fallback），或给一份家宽订阅（URL / 本地文件），两者可并存；
 - **日常订阅**：多份，URL 型由 mihomo 自动更新，文件型复制进去；
@@ -76,6 +89,7 @@ python3 watch.py --unpin        # 解锁 → 改配置 → 重新生成/粘贴 �
 ## 目录
 
 ```
+wizard.py                交互式引导 / 增删家宽与订阅（也可命令行）
 genconfig.py            生成 Merge.yaml / Script.js / providers / config.toml
 deadchain.example.toml  生成器输入示例
 templates/Script.js.tpl Script 模板

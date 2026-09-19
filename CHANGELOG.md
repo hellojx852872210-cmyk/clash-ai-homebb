@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- 新增 `wizard.py` 交互式引导与命令行增删：粘贴 socks5 / http / vless / trojan / ss / vmess / hysteria2 分享链接、`host:port:user:pass` 简写或 JSON 即可添加家宽节点；家宽订阅、日常订阅随时增删；生成/安装一键完成。
+- `genconfig.py --install` 遇到被 uchg 锁住的目标文件时给出明确提示。
+
 ## 0.1.0 (2026-09-19)
 
 首个可供他人使用的版本。
