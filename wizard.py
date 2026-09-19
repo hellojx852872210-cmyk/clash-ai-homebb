@@ -299,150 +299,160 @@ def generate(spec_path: Path, install: bool = False, yes: bool = False, out: Pat
 
 
 # ---------------- 菜单 ----------------
-class Back(Exception):
-    """用户在任意提示处输入 b：放弃当前操作，回主菜单。"""
+import ui  # noqa: E402
 
-
-BACK_WORDS = ("b", "back", "返回")
-
-
-def _ask(prompt: str, default: str = "", required: bool = False) -> str:
-    while True:
-        s = input(f"{prompt}{f' [{default}]' if default else ''}（b 返回）: ").strip()
-        if s.lower() in BACK_WORDS:
-            raise Back
-        if not s:
-            s = default
-        if s or not required:
-            return s
-        print("  不能为空")
-
-
-def _confirm(prompt: str, default_yes: bool = True) -> bool:
-    s = _ask(f"{prompt} {'Y/n' if default_yes else 'y/N'}", "y" if default_yes else "n")
-    return s.lower().startswith("y")
-
-
-def _pick(items: list[str], what: str) -> int:
-    """按编号或名字选一项，返回下标；列表为空直接 Back。"""
-    if not items:
-        print(f"  没有可选的{what}")
-        raise Back
-    for i, name in enumerate(items, 1):
-        print(f"  {i}. {name}")
-    while True:
-        s = _ask(f"选择{what}（编号或名字）", required=True)
-        if s.isdigit() and 1 <= int(s) <= len(items):
-            return int(s) - 1
-        if s in items:
-            return items.index(s)
-        print("  没有这一项")
+Back = ui.Back
+BACK_WORDS = ui.BACK_WORDS
+_ask = ui.ask
+_confirm = ui.confirm
+_pick = ui.choose
 
 
 def _menu_text(spec: dict, dirty: bool) -> str:
     hb = spec["homebb"]
-    lines = [describe(spec), ""]
-    lines.append(" 1) 添加家宽节点      2) 设置家宽订阅      3) 添加日常订阅")
-    lines.append(" 4) 删除家宽节点      5) 删除家宽订阅      6) 删除日常订阅")
-    lines.append(" 7) 直连 IP           8) DNS 随家宽        9) 生成到 generated/    10) 生成并安装到 Clash Verge")
-    lines.append(" s) 保存              0) 保存并退出        q) 不保存退出           （任何提示处输入 b 返回）")
-    if dirty:
-        lines.append(" * 有未保存的改动")
-    return "\n".join(lines)
+    nodes = hb["nodes"]
+    subs = spec["daily"]["subscriptions"]
+    sub = hb.get("subscription") or {}
+    pad = "\n" + " " * 12
+    L = [ui.bold("  当前配置") + (ui.yellow("   ● 有未保存的改动") if dirty else "")]
+    L.append("  家宽节点  " + (pad.join(f"{i}. {n['name']}  {n['type']}  {n['server']}:{n['port']}" for i, n in enumerate(nodes, 1)) if nodes else ui.dim("还没有，选 1 添加")))
+    L.append("  家宽订阅  " + ((sub.get("url") or sub.get("file")) if sub else ui.dim("无")))
+    L.append("  日常订阅  " + (pad.join(f"{i}. {x['name']}  {'链接' if x.get('url') else '文件'}  {x.get('url') or x.get('file')}" for i, x in enumerate(subs, 1)) if subs else ui.dim("还没有，选 3 添加")))
+    L.append("  其它      直连 IP：" + (", ".join(spec["direct"].get("ips") or []) or "无")
+             + "   DNS 随家宽：" + ("开" if spec["dns"].get("via_homebb", True) else "关")
+             + f"   家宽入口：127.0.0.1:{hb.get('listener_port', 7901)}")
+    L.append("")
+    L.append("  添加   1 家宽节点    2 家宽订阅    3 日常订阅")
+    L.append("  删除   4 家宽节点    5 家宽订阅    6 日常订阅")
+    L.append("  设置   7 直连 IP     8 DNS 随家宽")
+    L.append("  完成   9 生成配置    i 生成并安装到 Clash Verge")
+    L.append("  退出   0 保存并退出  s 只保存      q 不保存退出")
+    L.append(ui.dim("  任何问题处输入 b 都能回到这里"))
+    return "\n".join(L)
 
 
 def menu(spec_path: Path = SPEC_PATH, out_dir: Path | None = None) -> int:
     spec = load_spec(spec_path)
     dirty = False
-    print(f"配置文件：{spec_path}\n")
+    ui.title("家宽与订阅")
+    ui.note(f"配置文件：{spec_path}")
     while True:
+        print()
         print(_menu_text(spec, dirty))
         try:
             c = _ask("选择", required=True).lower()
             if c == "1":
-                raw = _ask("粘贴节点（socks5:// vless:// trojan:// ss:// vmess:// hysteria2:// 链接，或 host:port[:user:pass]，或 JSON）", required=True)
-                http = raw.count(":") in (1, 3) and "://" not in raw and _ask("简写格式当作 socks5 还是 http", "socks5") == "http"
+                ui.section("添加家宽节点")
+                ui.note("粘贴一行即可：socks5:// http:// vless:// trojan:// ss:// vmess:// hysteria2:// 分享链接，")
+                ui.note("或住宅代理常见的 host:port:user:pass，或一段 JSON 节点。")
+                raw = _ask("节点", required=True)
+                http = raw.count(":") in (1, 3) and "://" not in raw and _ask("这是 socks5 还是 http 代理", "socks5") == "http"
                 node = parse_node(raw, default_name=f"home-{len(spec['homebb']['nodes']) + 1}", prefer_http=http)
-                node["name"] = _ask("名字", node["name"], required=True)
-                print(f"  → {node['name']}: {node['type']} {node['server']}:{node['port']}")
+                node["name"] = _ask("给它起个名字", node["name"], required=True)
+                ui.info(f"{node['name']}  {node['type']}  {node['server']}:{node['port']}")
                 if _confirm("确认添加"):
                     add_home_node(spec, node)
                     dirty = True
-                    print(f"已添加 {node['name']}")
+                    ui.success(f"已添加 {node['name']}")
+                else:
+                    ui.note("没有添加")
             elif c == "2":
+                ui.section("设置家宽订阅")
+                ui.note("家宽服务商给的 Clash 订阅链接，或你下载好的 yaml 文件路径。节点名不固定也没关系。")
                 cur = spec["homebb"].get("subscription") or {}
-                src = _ask("家宽订阅 URL 或本地 yaml 路径", cur.get("url") or cur.get("file") or "", required=True)
+                src = _ask("链接或文件路径", cur.get("url") or cur.get("file") or "", required=True)
                 set_home_sub(spec, src)
                 dirty = True
-                print("已设置家宽订阅")
+                ui.success("已设置家宽订阅")
             elif c == "3":
-                name = _ask("订阅名字（不要空格）", required=True)
+                ui.section("添加日常订阅")
+                ui.note("平时上网用的机场订阅。可以加多份，能通哪条走哪条。")
+                name = _ask("起个名字（不要空格）", required=True)
                 if any(x.get("name") == name for x in spec["daily"]["subscriptions"]) and not _confirm(f"{name} 已存在，覆盖", False):
                     raise Back
-                src = _ask("URL 或本地 yaml 路径", required=True)
+                src = _ask("订阅链接或 yaml 文件路径", required=True)
                 add_daily(spec, name, src)
                 dirty = True
-                print(f"已添加日常订阅 {name}")
+                ui.success(f"已添加日常订阅 {name}")
             elif c == "4":
+                ui.section("删除家宽节点")
                 names = [n["name"] for n in spec["homebb"]["nodes"]]
                 name = names[_pick(names, "家宽节点")]
                 if _confirm(f"确认删除 {name}", False):
                     remove_home_node(spec, name)
                     dirty = True
-                    print("已删除")
+                    ui.success(f"已删除 {name}")
+                else:
+                    ui.note("没有删除")
             elif c == "5":
+                ui.section("删除家宽订阅")
                 if not spec["homebb"].get("subscription"):
-                    print("本来就没有家宽订阅")
+                    ui.note("本来就没有家宽订阅")
                 elif _confirm("确认删除家宽订阅", False):
                     clear_home_sub(spec)
                     dirty = True
-                    print("已删除")
+                    ui.success("已删除")
+                else:
+                    ui.note("没有删除")
             elif c == "6":
+                ui.section("删除日常订阅")
                 names = [x["name"] for x in spec["daily"]["subscriptions"]]
                 name = names[_pick(names, "日常订阅")]
                 if _confirm(f"确认删除 {name}", False):
                     remove_daily(spec, name)
                     dirty = True
-                    print("已删除")
+                    ui.success(f"已删除 {name}")
+                else:
+                    ui.note("没有删除")
             elif c == "7":
+                ui.section("直连 IP")
+                ui.note("你自己的服务器（SSH 之类）需要绕过代理直连的，填公网 IP，逗号分隔；没有就留空。输入 - 清空。")
                 cur = ", ".join(spec["direct"].get("ips") or [])
-                s = _ask("必须直连的 IP，逗号分隔（输入 - 清空）", cur)
-                spec["direct"]["ips"] = [] if s == "-" else [x.strip() for x in s.split(",") if x.strip()]
+                v = _ask("IP 列表", cur)
+                spec["direct"]["ips"] = [] if v == "-" else [x.strip() for x in v.split(",") if x.strip()]
                 dirty = True
+                ui.success("已更新")
             elif c == "8":
-                spec["dns"]["via_homebb"] = _confirm("用户 DNS 走家宽（家宽挂了 DNS 一起断）", spec["dns"].get("via_homebb", True))
+                ui.section("DNS 随家宽")
+                ui.note("开：域名解析也走家宽，家宽一断 DNS 一起断，最保险。关：DNS 走默认线路。")
+                spec["dns"]["via_homebb"] = _confirm("开启", spec["dns"].get("via_homebb", True))
                 dirty = True
-            elif c in ("9", "10"):
-                if c == "10":
-                    print("将覆盖 Clash Verge 里的 Merge.yaml / Script.js（自动备份）。若之前 --pin 上过锁，先 python3 watch.py --unpin。")
+                ui.success("已更新")
+            elif c in ("9", "i", "10"):
+                ui.section("生成配置" if c == "9" else "生成并安装")
+                if c != "9":
+                    ui.note("会覆盖 Clash Verge 里的 Merge.yaml / Script.js，原文件自动备份。之前上过锁的话先 python3 watch.py --unpin。")
                     if _ask("输入 yes 确认", required=True) != "yes":
                         raise Back
                 save_spec(spec, spec_path)
                 dirty = False
-                rc = generate(spec_path, install=(c == "10"), yes=True, out=out_dir)
-                print("完成，看 generated/INSTALL.md" if rc == 0 else f"失败（exit {rc}）")
+                rc = generate(spec_path, install=(c != "9"), yes=True, out=out_dir)
+                if rc == 0:
+                    ui.success("完成。下一步看 generated/INSTALL.md")
+                else:
+                    ui.fail(f"没成功（exit {rc}），上面有原因")
             elif c == "s":
                 save_spec(spec, spec_path)
                 dirty = False
-                print(f"已保存 {spec_path}")
+                ui.success(f"已保存 {spec_path}")
             elif c == "0":
                 save_spec(spec, spec_path)
-                print(f"已保存 {spec_path}")
+                ui.success(f"已保存 {spec_path}")
                 return 0
             elif c == "q":
-                if not dirty or _confirm("有未保存的改动，确定不保存退出", False):
-                    print("未保存，已退出")
+                if not dirty or _confirm("有未保存的改动，确定不保存就退出", False):
+                    ui.note("没有保存，已退出")
                     return 0
             else:
-                print("没有这个选项")
+                ui.note("没有这个选项")
         except Back:
-            print("已返回")
+            ui.note("已返回")
         except (ValueError, KeyError, json.JSONDecodeError) as e:
-            print(f"出错：{e}")
+            ui.fail(f"出错：{e}")
         except (KeyboardInterrupt, EOFError):
-            print("\n已中断" + ("，未保存的改动没有写入" if dirty else ""))
+            print()
+            ui.note("已中断" + ("，未保存的改动没有写入" if dirty else ""))
             return 1
-        print()
 
 
 def main(argv: list[str] | None = None) -> int:

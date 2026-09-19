@@ -127,35 +127,48 @@ def detect() -> dict:
 
 
 # ---------------- 报告 ----------------
+import ui  # noqa: E402
+
+
 def _mark(v) -> str:
-    return "✓" if v is True else ("✗" if v is False else "–")
+    return ui.mark(v)
 
 
 def render(st: dict) -> str:
-    L = ["== 环境检测 =="]
-    L.append(f" {_mark(st['os'])} macOS                {st['os_detail']}")
-    L.append(f" {_mark(st['python'])} Python ≥ 3.11        {st['python_detail']}")
-    L.append(f" {_mark(st['curl'])} curl")
-    L.append(f" {_mark(st['pyobjc'])} PyObjC（悬浮窗用，可选）")
-    L.append(f" {_mark(st['pytest'])} pytest（可选，没有就用 unittest）")
-    L.append("== Clash Verge Rev ==")
-    L.append(f" {_mark(st['verge_app'])} 已安装 {VERGE_APP}")
-    L.append(f" {_mark(st['verge_dir'])} 数据目录 {VERGE_DIR}")
-    L.append(f" {_mark(st['core_running'])} 内核在跑{('  mihomo ' + st['core_version']) if st['core_version'] else ''}")
-    L.append(f" {_mark(st['tun'])} TUN 模式（进程规则需要）")
-    L.append(f" {_mark(st['system_proxy'])} 系统代理已开（浏览器把域名交给 Clash，避开 ECH 绕过）")
-    L.append(f" {_mark(st['daily_port'])} 日常口 {SETTINGS.clash.daily_proxy}{('  出口 ' + st['daily_ip']) if st['daily_ip'] else ''}")
-    L.append(f" {_mark(st['homebb_port'])} 家宽口 {SETTINGS.clash.homebb_proxy}{('  出口 ' + st['homebb_ip']) if st['homebb_ip'] else ('  端口在但拨不通' if st['homebb_port'] else '')}")
-    L.append("== 本项目 ==")
-    L.append(f" {_mark(st['deadchain_installed'])} 死链已装进 Verge 的 Merge.yaml{'' if st['merge_exists'] else '（Merge.yaml 不存在）'}")
-    L.append(f" {_mark(st['providers'] > 0)} 订阅副本 ai-homebb-providers/（{st['providers']} 份）")
-    L.append(f" {_mark(st['spec'])} deadchain.toml（你的家宽/订阅描述）")
-    L.append(f" {_mark(st['generated'])} generated/ 已生成")
-    L.append(f" {_mark(st['config'])} config.toml（监控配置）")
-    L.append(f" {_mark(st['lock_ok'] if st['lock_json'] else None)} 配置锁{'（' + ('完好' if st['lock_ok'] else '异常') + '）' if st['lock_json'] else '（未上锁）'}")
-    L.append(f" {_mark(st['launchd_watch'])} launchd 监控任务    {_mark(st['launchd_float'])} launchd 悬浮窗任务")
+    """检测报告。✗ 的项目后面直接写该怎么办。"""
+    L: list[str] = []
+    m = ui.mark
+
+    def row(v, label, ok_detail="", bad_detail=""):
+        d = ok_detail if v else bad_detail
+        L.append(f"  {m(v)} {label}" + (ui.dim(f"  {d}") if d else ""))
+
+    L.append(ui.bold("  环境"))
+    row(st["os"], "macOS", st["os_detail"], "本项目只支持 macOS")
+    row(st["python"], "Python 3.11+", st["python_detail"], f"当前 {st['python_detail']}，brew install python")
+    row(st["curl"], "curl", "", "xcode-select --install")
+    row(st["pyobjc"] or None, "悬浮窗依赖 PyObjC", "", "可选：pip install pyobjc-framework-Cocoa")
+    row(st["pytest"] or None, "pytest", "", "可选，没有就用 unittest")
+    L.append("")
+    L.append(ui.bold("  Clash Verge Rev"))
+    row(st["verge_app"], "已安装", str(VERGE_APP), "去 github.com/clash-verge-rev/clash-verge-rev/releases 下载")
+    row(st["core_running"], "内核在跑", f"mihomo {st['core_version']}".strip(), "打开 Clash Verge 并启动内核")
+    row(st["tun"], "TUN 模式", "", "设置里打开，按进程分流需要它")
+    row(st["system_proxy"], "系统代理", "", "设置里打开，浏览器会把域名交给 Clash")
+    row(st["daily_port"], f"日常出口 {SETTINGS.clash.daily_proxy}", f"出口 IP {st['daily_ip']}" if st["daily_ip"] else "端口在，暂时拨不通", "端口没开")
+    row(st["homebb_port"], f"家宽入口 {SETTINGS.clash.homebb_proxy}", f"出口 IP {st['homebb_ip']}" if st["homebb_ip"] else "端口在，家宽暂时拨不通", "还没装死链，端口不存在")
+    L.append("")
+    L.append(ui.bold("  本项目"))
+    row(st["deadchain_installed"], "死链已装进 Clash Verge", "", "还没装" if st["merge_exists"] else "Merge.yaml 不存在")
+    row(st["providers"] > 0 or None, "订阅副本", f"{st['providers']} 份" if st["providers"] else "", "")
+    row(st["spec"], "deadchain.toml", "", "还没记录你的家宽和订阅")
+    row(st["generated"], "generated/", "已生成", "还没生成")
+    row(st["config"], "config.toml", "", "安装时会自动放好")
+    row(st["lock_ok"] if st["lock_json"] else None, "配置锁", "完好" if st["lock_ok"] else "", "锁异常，重新 --pin" if st["lock_json"] else "未上锁")
+    row(st["launchd_watch"], "后台监控 launchd", "", "未安装")
+    row(st["launchd_float"] or None, "悬浮窗 launchd", "", "未安装（可选）")
     if st["watch_code"]:
-        L.append(f" –  监控最近一轮：{st['watch_code']}")
+        L.append(f"  {ui.NA} 监控最近一轮" + ui.dim(f"  {st['watch_code']}"))
     return "\n".join(L)
 
 
@@ -187,82 +200,117 @@ def plan(st: dict) -> list[tuple[str, str]]:
     return steps
 
 
+# 把细步骤归成人看得懂的几大步：(标题, 一句话说明, 包含的细步骤)
+STAGES: list[tuple[str, str, tuple[str, ...]]] = [
+    ("准备 Clash Verge", "确认内核已经启动，设置里打开 TUN 模式和系统代理。", ("core",)),
+    ("添加家宽和订阅", "打开向导，把你的家宽 IP/节点和平时用的机场订阅记下来。", ("wizard",)),
+    ("生成并安装", "按记录生成 Clash 配置，装进 Clash Verge（原文件会备份），再在 Verge 里激活。", ("generate", "install", "activate")),
+    ("验证", "看家宽入口的出口 IP 是不是你的家宽，监控跑一轮应为「正常」。", ("verify",)),
+    ("上锁与后台监控", "给配置打不可变标记防误改，装上每 3 分钟一轮的监控和悬浮窗。", ("pin", "launchd")),
+]
+
+
+def group_steps(steps: list[tuple[str, str]]) -> list[tuple[str, str, list[str]]]:
+    """按 STAGES 顺序把 plan() 的细步骤归组，空的组不出现。"""
+    keys = [k for k, _ in steps]
+    out = []
+    for title, desc, members in STAGES:
+        present = [k for k in members if k in keys]
+        if present:
+            out.append((title, desc, present))
+    return out
+
+
 # ---------------- 引导 ----------------
-def _yes(prompt: str, default: bool = True) -> bool:
-    s = input(f"{prompt} {'Y/n' if default else 'y/N'}: ").strip().lower()
-    if not s:
-        return default
-    return s.startswith("y")
-
-
 def _run(argv: list[str]) -> int:
-    print("  $ " + " ".join(argv))
+    ui.note("$ " + " ".join(argv))
+    sys.stdout.flush()  # 子进程直接写 fd，先把我们的输出刷出去，顺序才对
     return subprocess.run(argv, cwd=HERE).returncode
+
+
+def _do(key: str, st: dict) -> tuple[bool, dict]:
+    """执行一个细步骤；返回 (是否继续引导, 最新检测结果)。"""
+    if key == "core":
+        ui.pause("打开 Clash Verge 并启动内核后，按回车重新检测")
+        st = detect()
+        if not st["core_running"]:
+            ui.fail("内核还是没起来。先在 Clash Verge 里处理好，再重跑 python3 start.py")
+            return False, st
+        ui.success("内核已在运行")
+    elif key == "wizard":
+        import wizard
+        wizard.menu(SPEC)
+        if not SPEC.exists():
+            ui.note("没有保存 deadchain.toml，先到这里。下次重跑 python3 start.py 会接着来")
+            return False, st
+    elif key == "generate":
+        if _run([PY, "genconfig.py", str(SPEC), "--out", "generated"]) != 0:
+            return False, st
+    elif key == "install":
+        ui.note("会覆盖 Clash Verge 里的 Merge.yaml / Script.js，原文件备份为 *.bak-时间戳，并把 config.toml 放到项目目录。")
+        if ui.confirm("现在安装", False):
+            if (HERE / "lock.json").exists():
+                _run([PY, "watch.py", "--unpin"])
+            if _run([PY, "genconfig.py", str(SPEC), "--out", "generated", "--install", "--yes"]) != 0:
+                return False, st
+        else:
+            ui.note("跳过。之后可以手动：python3 genconfig.py deadchain.toml --out generated --install --yes")
+    elif key == "activate":
+        ui.info("到 Clash Verge：切换一下配置档（让它按新配置重新生成），然后在 Proxies 组里选「日常出口」。")
+        ui.pause("做完按回车")
+    elif key == "verify":
+        ip = _curl_ip(SETTINGS.clash.homebb_proxy, SETTINGS.probe.ip_url)
+        if ip:
+            ui.success(f"家宽入口出口 IP：{ip}")
+        else:
+            ui.fail("家宽入口拨不通。检查节点信息、Verge 是否已重新生成、Proxies 是否选了「日常出口」")
+        _run([PY, "watch.py"])
+    elif key == "pin":
+        if ui.confirm("上锁"):
+            _run([PY, "watch.py", "--pin"])
+    elif key == "launchd":
+        if ui.confirm("安装后台监控和悬浮窗"):
+            _run(["bash", str(HERE / "install.sh")])
+    return True, st
 
 
 def guide(st: dict) -> int:
     steps = plan(st)
     if steps and steps[0][0] == "stop":
-        print("\n先解决这个再继续：" + steps[0][1])
+        print()
+        ui.fail(steps[0][1])
         return 2
-    print("\n== 接下来 ==")
-    for i, (_, text) in enumerate(steps, 1):
-        print(f" {i}. {text}")
-    print("\n每一步都会先问你，回车默认执行，n 跳过，Ctrl-C 随时退出。\n")
-    done: list[str] = []
+    stages = group_steps(steps)
+    ui.section(f"接下来要做 {len(stages)} 件事")
+    for i, (title, _, _) in enumerate(stages, 1):
+        ui.info(f"{i}. {title}")
+    ui.note("每一步都会先说明，回车开始，s 跳过，q 退出；Ctrl-C 也可以随时退出，重跑会从当前状态接着来。")
     try:
-        for key, text in steps:
-            print(f"--- {text}")
-            if key == "core":
-                input("  打开 Clash Verge 并启动内核后按回车重新检测…")
-                st = detect()
-                if not st["core_running"]:
-                    print("  内核还是没起来，先在 Clash Verge 里处理好再重跑 start.py")
+        ui.pause("准备好了按回车")
+        done: list[str] = []
+        for i, (title, desc, keys) in enumerate(stages, 1):
+            ui.title(f"第 {i} 步 / 共 {len(stages)} 步  {title}")
+            ui.note(desc)
+            c = ui.ask("回车开始，s 跳过，q 退出", allow_back=False).lower()
+            if c == "q":
+                ui.note("已退出。重跑 python3 start.py 会从当前状态接着来")
+                return 1
+            if c == "s":
+                ui.note("跳过")
+                continue
+            for k in keys:
+                ok, st = _do(k, st)
+                if not ok:
                     return 2
-                print("  内核已在运行")
-            elif key == "wizard":
-                if _yes("  现在进向导添加？"):
-                    import wizard
-                    wizard.menu(SPEC)
-                    if not SPEC.exists():
-                        print("  没有保存 deadchain.toml，先到这里；下次重跑 start.py 继续")
-                        return 1
-            elif key == "generate":
-                if _yes("  生成到 generated/？"):
-                    if _run([PY, "genconfig.py", str(SPEC), "--out", "generated"]) != 0:
-                        return 2
-            elif key == "install":
-                print("  会覆盖 Clash Verge 里的 Merge.yaml / Script.js（原文件备份为 *.bak-时间戳），并把 config.toml 放到项目目录")
-                if _yes("  安装？", False):
-                    if (HERE / "lock.json").exists():
-                        _run([PY, "watch.py", "--unpin"])
-                    if _run([PY, "genconfig.py", str(SPEC), "--out", "generated", "--install", "--yes"]) != 0:
-                        return 2
-                else:
-                    print("  跳过。之后手动：python3 genconfig.py deadchain.toml --out generated --install --yes，或按 generated/INSTALL.md 粘贴")
-            elif key == "activate":
-                print("  到 Clash Verge：切换一下配置档（让它按新 Merge/Script 重新生成），然后 Proxies 组选「日常出口」。")
-                input("  做完按回车…")
-            elif key == "verify":
-                ip = _curl_ip(SETTINGS.clash.homebb_proxy, SETTINGS.probe.ip_url)
-                print(f"  家宽口出口 IP：{ip or '拨不通'}")
-                _run([PY, "watch.py"])
-                if not ip:
-                    print("  家宽拨不通：检查节点信息、Verge 是否已重新生成、Proxies 是否选了「日常出口」；修好后重跑 start.py")
-            elif key == "pin":
-                if _yes("  上锁？"):
-                    _run([PY, "watch.py", "--pin"])
-            elif key == "launchd":
-                if _yes("  安装 launchd 任务？"):
-                    _run(["bash", str(HERE / "install.sh")])
-            done.append(key)
-            print()
+            done.append(title)
     except (KeyboardInterrupt, EOFError):
-        print("\n已中断。已完成：" + (", ".join(done) or "无") + "。重跑 start.py 会从当前状态继续。")
+        print()
+        ui.note("已中断。重跑 python3 start.py 会从当前状态接着来")
         return 1
-    print("== 完成 ==")
+    ui.title("完成")
     print(render(detect()))
-    print("\n日常：python3 watch.py 看一轮；python3 wizard.py 增删节点/订阅后重新生成并安装（先 --unpin 再 --pin）。")
+    print()
+    ui.note("以后：python3 watch.py 看一轮；python3 wizard.py 增删节点或订阅后重新生成并安装（先 --unpin，装完 --pin）。")
     return 0
 
 
@@ -270,12 +318,20 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="环境检测 + 引导")
     ap.add_argument("--check", action="store_true", help="只检测、打印报告，不做改动")
     a = ap.parse_args(argv)
+    ui.title("clash-ai-homebb 引导")
+    ui.note("先看看你的环境。这一步只读，不会改任何东西。")
+    print()
     st = detect()
     print(render(st))
     if a.check:
-        print("\n== 建议 ==")
-        for i, (_, text) in enumerate(plan(st), 1):
-            print(f" {i}. {text}")
+        stages = group_steps(plan(st))
+        steps = plan(st)
+        ui.section("建议")
+        if steps and steps[0][0] == "stop":
+            ui.fail(steps[0][1])
+        else:
+            for i, (title, desc, _) in enumerate(stages, 1):
+                ui.info(f"{i}. {title}" + ui.dim(f"  {desc}"))
         return 0
     return guide(st)
 

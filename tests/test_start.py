@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from start import plan, render
+from start import group_steps, plan, render
 
 
 def state(**kw) -> dict:
@@ -52,8 +52,18 @@ class RenderTest(unittest.TestCase):
     def test_marks_and_details(self):
         text = render(state(tun=None, homebb_ip="", pytest=False))
         self.assertIn("✓ macOS", text)
-        self.assertIn("✗ pytest", text)
+        self.assertIn("– pytest", text)  # 可选项不标红
         self.assertIn("– TUN", text)
-        self.assertIn("端口在但拨不通", text)
-        self.assertIn("监控最近一轮：ok", text)
+        self.assertIn("家宽暂时拨不通", text)
+        self.assertIn("监控最近一轮  ok", text)
         self.assertIn("出口 198.51.100.1", text)
+
+
+class GroupTest(unittest.TestCase):
+    def test_groups_follow_stage_order_and_drop_empty(self):
+        steps = plan(state(core_running=False, spec=False, generated=False, deadchain_installed=False, lock_json=False, launchd_watch=False))
+        titles = [t for t, _, _ in group_steps(steps)]
+        self.assertEqual(titles, ["准备 Clash Verge", "添加家宽和订阅", "生成并安装", "验证", "上锁与后台监控"])
+        self.assertEqual(group_steps(plan(state()))[0][2], ["activate"])
+        self.assertEqual([t for t, _, _ in group_steps(plan(state()))], ["生成并安装", "验证"])
+
