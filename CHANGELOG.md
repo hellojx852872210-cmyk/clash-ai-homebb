@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 监控：控制器暂时没返回 AI 组时判为 `core_reloading`（警告）而不是 `deadchain_broken`；`core_reloading` / `clash_dead` / `deadchain_broken` 默认加入去抖，切换配置档引起的内核重载不再弹窗。
+
 ## 0.1.0 (2026-09-19)
 
 首个可供他人使用的版本。

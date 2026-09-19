@@ -29,7 +29,7 @@ curl_timeout = 12
 [alert]
 title = "Clash 家宽监控"
 realert_secs = 1800                      # 持续非正常时每隔多久再提醒一次
-debounce_codes = ["daily_down"]          # 这些状态首次出现先观察一轮
+debounce_codes = ["daily_down", "core_reloading", "clash_dead", "deadchain_broken"]  # 这些状态首次出现先观察一轮（切换配置档时内核重载会短暂触发）
 modal = true                             # 切入非正常时额外弹一个 2 分钟自动消失的模态框
 sound = "Basso"
 telegram_token_env = "TG_TOKEN"          # 两个环境变量都有值才会发 Telegram
