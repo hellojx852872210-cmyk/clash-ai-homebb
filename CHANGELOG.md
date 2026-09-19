@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- 向导：菜单上直接给出「下一步选什么」及理由，回车即按建议执行；每个输入处附示例；引导里的确认项标明推荐答案。
 - 新增 `wizard.py` 交互式引导与命令行增删：粘贴 socks5 / http / vless / trojan / ss / vmess / hysteria2 分享链接、`host:port:user:pass` 简写或 JSON 即可添加家宽节点；家宽订阅、日常订阅随时增删；生成/安装一键完成。
 - `genconfig.py --install` 遇到被 uchg 锁住的目标文件时给出明确提示。
 - 向导菜单：任意提示处输入 b 返回、按编号/名字删除并二次确认、未保存改动提示、s 保存 / 0 保存退出 / q 不保存退出、Ctrl-C 不写文件、`--out` 指定生成目录。

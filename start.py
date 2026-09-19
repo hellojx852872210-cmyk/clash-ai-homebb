@@ -248,7 +248,9 @@ def _do(key: str, st: dict) -> tuple[bool, dict]:
             return False, st
     elif key == "install":
         ui.note("会覆盖 Clash Verge 里的 Merge.yaml / Script.js，原文件备份为 *.bak-时间戳，并把 config.toml 放到项目目录。")
-        if ui.confirm("现在安装", False):
+        first_time = not st.get("deadchain_installed")
+        ui.note("第一次装，推荐 y" if first_time else "Verge 里已有一份死链配置，确认要覆盖再 y")
+        if ui.confirm("现在安装", first_time):
             if (HERE / "lock.json").exists():
                 _run([PY, "watch.py", "--unpin"])
             if _run([PY, "genconfig.py", str(SPEC), "--out", "generated", "--install", "--yes"]) != 0:
@@ -266,9 +268,11 @@ def _do(key: str, st: dict) -> tuple[bool, dict]:
             ui.fail("家宽入口拨不通。检查节点信息、Verge 是否已重新生成、Proxies 是否选了「日常出口」")
         _run([PY, "watch.py"])
     elif key == "pin":
+        ui.note("推荐 y：锁住后误改会被监控发现；要改配置时 python3 watch.py --unpin")
         if ui.confirm("上锁"):
             _run([PY, "watch.py", "--pin"])
     elif key == "launchd":
+        ui.note("推荐 y：每 3 分钟检查一轮，出问题弹通知；悬浮窗显示前台 App 走的是家宽还是日常")
         if ui.confirm("安装后台监控和悬浮窗"):
             _run(["bash", str(HERE / "install.sh")])
     return True, st
@@ -291,7 +295,7 @@ def guide(st: dict) -> int:
         for i, (title, desc, keys) in enumerate(stages, 1):
             ui.title(f"第 {i} 步 / 共 {len(stages)} 步  {title}")
             ui.note(desc)
-            c = ui.ask("回车开始，s 跳过，q 退出", allow_back=False).lower()
+            c = ui.ask("回车开始（推荐），s 跳过，q 退出", allow_back=False).lower()
             if c == "q":
                 ui.note("已退出。重跑 python3 start.py 会从当前状态接着来")
                 return 1

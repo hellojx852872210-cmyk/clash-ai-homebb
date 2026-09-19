@@ -308,6 +308,20 @@ _confirm = ui.confirm
 _pick = ui.choose
 
 
+def suggest(spec: dict, dirty: bool, generated: bool = False) -> tuple[str, str]:
+    """根据当前状态给「下一步选什么」：(菜单键, 一句理由)。纯函数，方便测试。"""
+    hb = spec["homebb"]
+    if not hb["nodes"] and not hb.get("subscription"):
+        return "1", "还没有家宽。先加家宽节点（或选 2 填家宽订阅），AI 流量才有地方走"
+    if not spec["daily"]["subscriptions"]:
+        return "3", "还没有日常订阅。其它流量要走机场，加一份平时用的订阅"
+    if dirty:
+        return "9", "改动还没生成。选 9 会先保存再生成到 generated/"
+    if generated:
+        return "i", "已经生成好了。选 i 装进 Clash Verge；不想现在装就 0 退出，之后按 generated/INSTALL.md 手动放"
+    return "9", "家宽和订阅都齐了。选 9 生成配置，生成后再选 i 安装"
+
+
 def _menu_text(spec: dict, dirty: bool) -> str:
     hb = spec["homebb"]
     nodes = hb["nodes"]
@@ -334,19 +348,23 @@ def _menu_text(spec: dict, dirty: bool) -> str:
 def menu(spec_path: Path = SPEC_PATH, out_dir: Path | None = None) -> int:
     spec = load_spec(spec_path)
     dirty = False
+    generated = False
     ui.title("家宽与订阅")
     ui.note(f"配置文件：{spec_path}")
     while True:
         print()
         print(_menu_text(spec, dirty))
+        key, why = suggest(spec, dirty, generated)
+        print(ui.yellow(f"  建议 › {key}") + ui.dim(f"  {why}"))
         try:
-            c = _ask("选择", required=True).lower()
+            c = _ask("选择（直接回车 = 按建议）", default=key, required=True).lower()
             if c == "1":
                 ui.section("添加家宽节点")
                 ui.note("粘贴一行即可：socks5:// http:// vless:// trojan:// ss:// vmess:// hysteria2:// 分享链接，")
                 ui.note("或住宅代理常见的 host:port:user:pass，或一段 JSON 节点。")
+                ui.note("例：socks5://user:pass@203.0.113.5:1080   或   203.0.113.5:1080:user:pass")
                 raw = _ask("节点", required=True)
-                http = raw.count(":") in (1, 3) and "://" not in raw and _ask("这是 socks5 还是 http 代理", "socks5") == "http"
+                http = raw.count(":") in (1, 3) and "://" not in raw and _ask("这是 socks5 还是 http 代理（住宅代理商给的一般是 socks5）", "socks5") == "http"
                 node = parse_node(raw, default_name=f"home-{len(spec['homebb']['nodes']) + 1}", prefer_http=http)
                 node["name"] = _ask("给它起个名字", node["name"], required=True)
                 ui.info(f"{node['name']}  {node['type']}  {node['server']}:{node['port']}")
@@ -360,6 +378,7 @@ def menu(spec_path: Path = SPEC_PATH, out_dir: Path | None = None) -> int:
                 ui.section("设置家宽订阅")
                 ui.note("家宽服务商给的 Clash 订阅链接，或你下载好的 yaml 文件路径。节点名不固定也没关系。")
                 cur = spec["homebb"].get("subscription") or {}
+                ui.note("例：https://home.example/sub/xxx?type=clash   或   ~/Downloads/homebb.yaml")
                 src = _ask("链接或文件路径", cur.get("url") or cur.get("file") or "", required=True)
                 set_home_sub(spec, src)
                 dirty = True
@@ -367,9 +386,10 @@ def menu(spec_path: Path = SPEC_PATH, out_dir: Path | None = None) -> int:
             elif c == "3":
                 ui.section("添加日常订阅")
                 ui.note("平时上网用的机场订阅。可以加多份，能通哪条走哪条。")
-                name = _ask("起个名字（不要空格）", required=True)
+                name = _ask("起个名字（不要空格，例：机场A）", f"机场{chr(ord('A') + len(spec['daily']['subscriptions']))}", required=True)
                 if any(x.get("name") == name for x in spec["daily"]["subscriptions"]) and not _confirm(f"{name} 已存在，覆盖", False):
                     raise Back
+                ui.note("例：https://a.example/sub?target=clash   或   ~/Downloads/a.yaml（机场后台「复制 Clash 订阅链接」）")
                 src = _ask("订阅链接或 yaml 文件路径", required=True)
                 add_daily(spec, name, src)
                 dirty = True
@@ -406,7 +426,8 @@ def menu(spec_path: Path = SPEC_PATH, out_dir: Path | None = None) -> int:
                     ui.note("没有删除")
             elif c == "7":
                 ui.section("直连 IP")
-                ui.note("你自己的服务器（SSH 之类）需要绕过代理直连的，填公网 IP，逗号分隔；没有就留空。输入 - 清空。")
+                ui.note("你自己的服务器（SSH 之类）需要绕过代理直连的，填公网 IP，逗号分隔，例：203.0.113.10, 203.0.113.11。")
+                ui.note("大多数人没有，直接回车跳过；输入 - 清空。")
                 cur = ", ".join(spec["direct"].get("ips") or [])
                 v = _ask("IP 列表", cur)
                 spec["direct"]["ips"] = [] if v == "-" else [x.strip() for x in v.split(",") if x.strip()]
@@ -414,8 +435,8 @@ def menu(spec_path: Path = SPEC_PATH, out_dir: Path | None = None) -> int:
                 ui.success("已更新")
             elif c == "8":
                 ui.section("DNS 随家宽")
-                ui.note("开：域名解析也走家宽，家宽一断 DNS 一起断，最保险。关：DNS 走默认线路。")
-                spec["dns"]["via_homebb"] = _confirm("开启", spec["dns"].get("via_homebb", True))
+                ui.note("开：域名解析也走家宽，家宽一断 DNS 一起断，最保险（推荐）。关：DNS 走默认线路。")
+                spec["dns"]["via_homebb"] = _confirm("开启（推荐 y）", spec["dns"].get("via_homebb", True))
                 dirty = True
                 ui.success("已更新")
             elif c in ("9", "i", "10"):
@@ -428,7 +449,8 @@ def menu(spec_path: Path = SPEC_PATH, out_dir: Path | None = None) -> int:
                 dirty = False
                 rc = generate(spec_path, install=(c != "9"), yes=True, out=out_dir)
                 if rc == 0:
-                    ui.success("完成。下一步看 generated/INSTALL.md")
+                    generated = c == "9"
+                    ui.success("生成完成，下一步选 i 安装" if c == "9" else "已安装。到 Clash Verge 切换一下配置档让它生效，Proxies 组选「日常出口」")
                 else:
                     ui.fail(f"没成功（exit {rc}），上面有原因")
             elif c == "s":

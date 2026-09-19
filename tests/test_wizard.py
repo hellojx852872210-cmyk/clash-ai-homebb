@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from wizard import (
+    suggest,
     DEFAULT_SPEC, add_daily, add_home_node, clear_home_sub, describe, dump_toml, load_spec,
     parse_node, remove_daily, remove_home_node, save_spec, set_home_sub,
 )
@@ -215,3 +216,35 @@ class PickTest(unittest.TestCase):
             self.assertEqual(wizard._pick(["a", "b"], "x"), 0)
         with self.assertRaises(wizard.Back):
             wizard._pick([], "x")
+
+
+class SuggestTest(unittest.TestCase):
+    def spec(self):
+        return json.loads(json.dumps(DEFAULT_SPEC))
+
+    def test_no_homebb_suggests_add_home(self):
+        self.assertEqual(suggest(self.spec(), False)[0], "1")
+
+    def test_homebb_sub_counts_as_homebb(self):
+        s = self.spec(); set_home_sub(s, "https://h/sub")
+        self.assertEqual(suggest(s, False)[0], "3")
+
+    def test_no_daily_suggests_add_daily(self):
+        s = self.spec(); add_home_node(s, parse_node("203.0.113.5:1080", default_name="h"))
+        self.assertEqual(suggest(s, False)[0], "3")
+
+    def test_dirty_suggests_generate_and_generated_suggests_install(self):
+        s = self.spec(); add_home_node(s, parse_node("203.0.113.5:1080", default_name="h")); add_daily(s, "a", "https://a/sub")
+        self.assertEqual(suggest(s, True)[0], "9")
+        self.assertEqual(suggest(s, False, generated=True)[0], "i")
+        self.assertEqual(suggest(s, False)[0], "9")
+
+    def test_enter_follows_suggestion(self):
+        # 空配置：回车 = 建议 1（添加家宽），再回车用默认名，确认后保存退出
+        from unittest import mock
+        import wizard
+        p = Path(tempfile.mkdtemp()) / "deadchain.toml"
+        with mock.patch("builtins.input", side_effect=["", "203.0.113.5:1080:u:p", "", "", "", "0"]):
+            wizard.menu(p, Path(tempfile.mkdtemp()) / "out")
+        self.assertEqual(load_spec(p)["homebb"]["nodes"][0]["name"], "home-1")
+
