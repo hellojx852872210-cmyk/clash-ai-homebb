@@ -1,0 +1,89 @@
+# 由 clash-ai-homebb genconfig.py 生成于 2026-09-19 03:00。改 deadchain.toml 重新生成，不要手改。
+# 语义：AI 域名/进程/家宽入站口 → AI 组 → 家宽组（只有家宽节点，没有 DIRECT，挂了就断线）；
+#       其它流量 → 日常出口（各订阅 url-test + fallback，能通哪条走哪条）。
+find-process-mode: always
+ipv6: false
+proxy-providers:
+  "sub-airport-a": {"path": "./ai-homebb-providers/airport-a.yaml", "exclude-filter": "到期|流量|重置|获取|剩余|套餐|官网|Traffic|Expire|Reset", "override": {"additional-prefix": "[airport-a] "}, "health-check": {"enable": true, "url": "http://www.gstatic.com/generate_204", "interval": 300}, "type": "http", "url": "https://a.example/sub?target=clash", "interval": 86400}
+  "sub-airport-b": {"path": "./ai-homebb-providers/airport-b.yaml", "exclude-filter": "到期|流量|重置|获取|剩余|套餐|官网|Traffic|Expire|Reset", "override": {"additional-prefix": "[airport-b] "}, "health-check": {"enable": true, "url": "http://www.gstatic.com/generate_204", "interval": 300}, "type": "http", "url": "https://b.example/sub?target=clash", "interval": 86400}
+prepend-proxies:
+- {"name": "RESIP-A", "type": "vless", "server": "entry-a.example.com", "port": 443, "uuid": "00000000-0000-0000-0000-000000000000", "network": "tcp", "udp": false, "tls": true, "flow": "xtls-rprx-vision", "servername": "swdist.apple.com", "client-fingerprint": "chrome", "reality-opts": {"public-key": "REPLACE_WITH_PUBLIC_KEY", "short-id": "0123abcd"}, "interface-name": "en0"}
+- {"name": "HOME-SOCKS", "type": "socks5", "server": "203.0.113.5", "port": 1080, "username": "user", "password": "pass", "udp": false, "interface-name": "en0"}
+prepend-proxy-groups:
+- {"name": "airport-a-自动", "type": "url-test", "use": ["sub-airport-a"], "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 100, "lazy": false}
+- {"name": "airport-b-自动", "type": "url-test", "use": ["sub-airport-b"], "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 100, "lazy": false}
+- {"name": "日常-自动", "type": "fallback", "proxies": ["airport-a-自动", "airport-b-自动"], "url": "http://www.gstatic.com/generate_204", "interval": 120, "lazy": false}
+- {"name": "日常出口", "type": "select", "proxies": ["日常-自动", "airport-a-自动", "airport-b-自动"]}
+- {"name": "RESIP-Claude", "type": "fallback", "url": "http://www.gstatic.com/generate_204", "interval": 120, "lazy": false, "proxies": ["RESIP-A", "HOME-SOCKS"]}
+- {"name": "Claude-Only", "type": "select", "proxies": ["RESIP-Claude"]}
+prepend-rules:
+- "IN-NAME,homebb-in,Claude-Only"
+- "IN-PORT,7901,Claude-Only"
+- "AND,((DOMAIN-SUFFIX,anthropic.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,claude.ai),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,claude.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,claudeusercontent.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,statsigapi.net),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,statsig.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,featuregates.org),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,openai.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,chatgpt.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,oaistatic.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,oaiusercontent.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,arkoselabs.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,hcaptcha.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,gemini.google.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,aistudio.google.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,notebooklm.google.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,ai.google.dev),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,generativelanguage.googleapis.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,x.ai),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,grok.com),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((DOMAIN-SUFFIX,perplexity.ai),(NETWORK,udp),(DST-PORT,443)),REJECT"
+- "AND,((PROCESS-PATH-REGEX,.*/(Google Chrome|Google Chrome Canary|Chromium|Microsoft Edge|Safari|Cursor|ChatGPT|Brave Browser|Firefox|Arc|Dia).app/),(NETWORK,udp),(DST-PORT,19302)),REJECT"
+- "AND,((PROCESS-NAME,com.apple.WebKit.Networking),(NETWORK,udp),(DST-PORT,19302)),REJECT"
+- "AND,((PROCESS-PATH-REGEX,.*/(Google Chrome|Google Chrome Canary|Chromium|Microsoft Edge|Safari|Cursor|ChatGPT|Brave Browser|Firefox|Arc|Dia).app/),(NETWORK,udp),(DST-PORT,19305)),REJECT"
+- "AND,((PROCESS-NAME,com.apple.WebKit.Networking),(NETWORK,udp),(DST-PORT,19305)),REJECT"
+- "AND,((PROCESS-PATH-REGEX,.*/(Google Chrome|Google Chrome Canary|Chromium|Microsoft Edge|Safari|Cursor|ChatGPT|Brave Browser|Firefox|Arc|Dia).app/),(NETWORK,udp),(DST-PORT,3478)),REJECT"
+- "AND,((PROCESS-NAME,com.apple.WebKit.Networking),(NETWORK,udp),(DST-PORT,3478)),REJECT"
+- "PROCESS-NAME,Claude,Claude-Only"
+- "PROCESS-NAME,Claude Helper,Claude-Only"
+- "PROCESS-NAME,Claude Helper (GPU),Claude-Only"
+- "PROCESS-NAME,Claude Helper (Renderer),Claude-Only"
+- "PROCESS-NAME,claude,Claude-Only"
+- "PROCESS-NAME,codex,Claude-Only"
+- "PROCESS-PATH-REGEX,.*/\\.local/share/claude/versions/,Claude-Only"
+- "PROCESS-PATH-REGEX,.*/npm-global/.*(codex|@openai/codex),Claude-Only"
+- "DOMAIN-SUFFIX,anthropic.com,Claude-Only"
+- "DOMAIN-SUFFIX,claude.ai,Claude-Only"
+- "DOMAIN-SUFFIX,claude.com,Claude-Only"
+- "DOMAIN-SUFFIX,claudeusercontent.com,Claude-Only"
+- "DOMAIN-SUFFIX,statsigapi.net,Claude-Only"
+- "DOMAIN-SUFFIX,statsig.com,Claude-Only"
+- "DOMAIN-SUFFIX,featuregates.org,Claude-Only"
+- "DOMAIN-SUFFIX,openai.com,Claude-Only"
+- "DOMAIN-SUFFIX,chatgpt.com,Claude-Only"
+- "DOMAIN-SUFFIX,oaistatic.com,Claude-Only"
+- "DOMAIN-SUFFIX,oaiusercontent.com,Claude-Only"
+- "DOMAIN-SUFFIX,arkoselabs.com,Claude-Only"
+- "DOMAIN-SUFFIX,hcaptcha.com,Claude-Only"
+- "DOMAIN-SUFFIX,gemini.google.com,Claude-Only"
+- "DOMAIN-SUFFIX,aistudio.google.com,Claude-Only"
+- "DOMAIN-SUFFIX,notebooklm.google.com,Claude-Only"
+- "DOMAIN-SUFFIX,ai.google.dev,Claude-Only"
+- "DOMAIN-SUFFIX,generativelanguage.googleapis.com,Claude-Only"
+- "DOMAIN-SUFFIX,x.ai,Claude-Only"
+- "DOMAIN-SUFFIX,grok.com,Claude-Only"
+- "DOMAIN-SUFFIX,perplexity.ai,Claude-Only"
+- "IP-CIDR,160.79.104.0/21,Claude-Only,no-resolve"
+- "DOMAIN,entry-a.example.com,DIRECT"
+- "IP-CIDR,203.0.113.5/32,DIRECT,no-resolve"
+dns:
+  nameserver: ["https://1.1.1.1/dns-query#Claude-Only", "https://dns.google/dns-query#Claude-Only"]
+  default-nameserver: ["223.5.5.5", "8.8.8.8"]
+  proxy-server-nameserver: ["223.5.5.5", "8.8.8.8"]
+  fallback: ["https://1.1.1.1/dns-query#Claude-Only", "https://dns.google/dns-query#Claude-Only"]
+  nameserver-policy:
+    "+.anthropic.com,+.claude.ai,+.claude.com,+.claudeusercontent.com,+.statsigapi.net,+.statsig.com,+.featuregates.org,+.openai.com,+.chatgpt.com,+.oaistatic.com,+.oaiusercontent.com,+.arkoselabs.com,+.hcaptcha.com,+.gemini.google.com,+.aistudio.google.com,+.notebooklm.google.com,+.ai.google.dev,+.generativelanguage.googleapis.com,+.x.ai,+.grok.com,+.perplexity.ai": ["https://1.1.1.1/dns-query#Claude-Only", "https://dns.google/dns-query#Claude-Only"]
+listeners:
+- {"name": "homebb-in", "type": "mixed", "port": 7901, "listen": "127.0.0.1", "proxy": "Claude-Only"}

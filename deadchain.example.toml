@@ -1,0 +1,66 @@
+# clash-ai-homebb 生成器输入。复制成 deadchain.toml 改成你的，然后：
+#   python3 genconfig.py deadchain.toml --out generated/
+# 生成 Merge.yaml / Script.js / ai-homebb-providers/ / config.toml / INSTALL.md。
+# 默认不碰 Clash Verge；确认无误后 --install --yes 才会复制进去（原文件会备份）。
+
+[names]
+ai_group = "Claude-Only"        # AI 规则指向的组：select，只含家宽组（死链）
+homebb_group = "RESIP-Claude"   # 家宽组：fallback
+daily_group = "日常出口"          # 日常出口组：select，第一项是自动
+
+[homebb]
+interface = "en0"               # 家宽节点绑定的物理网卡直拨；留空则由 mihomo 自动选
+listener_port = 7901            # 专用入站口：打到 127.0.0.1:7901 的流量只走家宽
+
+# 方式 A：直接写家宽节点（mihomo 支持的任意类型：vless / trojan / socks5 / http / ss / hysteria2 …）
+[[homebb.nodes]]
+name = "RESIP-A"
+type = "vless"
+server = "entry-a.example.com"
+port = 443
+uuid = "00000000-0000-0000-0000-000000000000"
+network = "tcp"
+udp = false
+tls = true
+flow = "xtls-rprx-vision"
+servername = "swdist.apple.com"
+client-fingerprint = "chrome"
+reality-opts = { public-key = "REPLACE_WITH_PUBLIC_KEY", short-id = "0123abcd" }
+
+[[homebb.nodes]]
+name = "HOME-SOCKS"
+type = "socks5"
+server = "203.0.113.5"          # 你的家宽 IP
+port = 1080
+username = "user"
+password = "pass"
+udp = false
+
+# 方式 B：家宽订阅（Clash 格式）。节点名不固定，watch 只检查组非空。可与方式 A 并存（订阅排在节点后面兜底）
+# [homebb.subscription]
+# url = "https://home.example/sub/xxx?type=clash"
+# file = "~/Downloads/homebb.yaml"        # 二选一
+
+[daily]
+# 日常订阅：能通哪条走哪条。按顺序 fallback，每条内部 url-test 自动选优。url 型由 mihomo 自动更新，file 型复制进去
+[[daily.subscriptions]]
+name = "airport-a"
+url = "https://a.example/sub?target=clash"
+[[daily.subscriptions]]
+name = "airport-b"
+file = "~/Downloads/airport-b.yaml"
+
+[ai]
+# 走家宽的域名后缀。不写用内置默认（Anthropic / OpenAI / Google AI / xAI / Perplexity / arkose / hcaptcha）
+# domains = ["anthropic.com", "claude.ai", "openai.com", "chatgpt.com"]
+processes = ["Claude", "Claude Helper", "Claude Helper (GPU)", "Claude Helper (Renderer)", "claude", "codex"]
+process_path_regex = [".*/\\.local/share/claude/versions/", ".*/npm-global/.*(codex|@openai/codex)"]
+reject_quic = true              # AI 域名 REJECT UDP/443，逼浏览器降到 TCP，避免 HTTP/3 漏真实 IP
+reject_stun_browsers = true     # 常见浏览器的 STUN(19302/19305/3478) REJECT，避免 WebRTC 暴露第二身份
+
+[dns]
+via_homebb = true               # 用户 DNS 走 DoH#AI 组（家宽挂了 DNS 一起 fail-closed）；false 则不改 dns
+bootstrap = ["223.5.5.5", "8.8.8.8"]   # 解析 DoH 服务器/节点域名用的明文 DNS，按你所在地区改
+
+[direct]
+ips = []                        # 自家机 SSH 等必须直连（TUN exclude + 规则 DIRECT），例 ["203.0.113.10"]

@@ -1,0 +1,49 @@
+# clash-ai-homebb 配置示例。复制为 config.toml 后按你的 Clash 配置改。
+# 每一项都有默认值，只写你要改的即可。路径支持 ~ 和 glob。
+
+[clash]
+# mihomo 控制器：Clash Verge Rev 默认提供 unix socket；其它客户端可改用 controller + secret
+socket = "/tmp/verge/verge-mihomo.sock"
+# controller = "127.0.0.1:9097"
+# secret = ""
+daily_proxy = "http://127.0.0.1:7897"    # 日常出口（mixed-port）
+homebb_proxy = "http://127.0.0.1:7901"   # 家宽专用入站口（Merge 里 listeners 指向家宽组的那个）
+
+[deadchain]
+ai_group = "Claude-Only"                 # AI 规则指向的组：select，只含 homebb_group
+homebb_group = "RESIP-Claude"            # 家宽组
+homebb_group_type = "Fallback"           # 家宽组类型（mihomo API 里的写法：Fallback / URLTest / Selector）
+homebb_members = ["RESIP-A", "RESIP-B"]  # 家宽入口节点名；家宽来自订阅 provider 时留空 []
+homebb_member_type = "Vless"             # mihomo API 里这些节点的 type；留空 "" 不检查
+homebb_markers = ["Claude-Only", "RESIP-Claude"]  # 悬浮窗把链路里含这些名字的连接算作家宽
+
+[probe]
+ip_url = "https://api.ipify.org"
+ai_probe_url = "https://api.openai.com/v1/models"
+ai_hosts = ["openai.com", "chatgpt.com"]
+uplink_interface = "en0"
+# 必须绕过 TUN 直连的自家机器（SSH/运维），和 Merge 里 tun.route-exclude-address 保持一致；没有就留空
+direct_ips = []
+curl_timeout = 12
+
+[alert]
+title = "Clash 家宽监控"
+realert_secs = 1800                      # 持续非正常时每隔多久再提醒一次
+debounce_codes = ["daily_down"]          # 这些状态首次出现先观察一轮
+modal = true                             # 切入非正常时额外弹一个 2 分钟自动消失的模态框
+sound = "Basso"
+telegram_token_env = "TG_TOKEN"          # 两个环境变量都有值才会发 Telegram
+telegram_chat_env = "TG_CHAT"
+
+[lock]
+# watch.py --pin 会给这些文件打 uchg 不可变标记并记录 sha256，每轮校验；为空则不启用
+files = [
+  "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/profiles/Merge.yaml",
+  "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/profiles/Script.js",
+  "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/ai-homebb-providers/*.yaml",
+]
+
+[hud]
+tick = 1.5
+stale_secs = 900
+# ai_suffixes / noise_suffixes / terminal_names 也可在这里覆盖，见 config.py 默认值

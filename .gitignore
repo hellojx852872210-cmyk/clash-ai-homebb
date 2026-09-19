@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# 本机运行产物
+config.toml
+deadchain.toml
+lock.json
+state.json
+watch.log
+watch.launchd.out
+watch.launchd.err
+float.launchd.out
+float.launchd.err
+/generated/
+_refactor-bak/
+*.bak-*
+.DS_Store
