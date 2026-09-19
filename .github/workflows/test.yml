@@ -1,0 +1,13 @@
+name: test
+on: [push, pull_request]
+jobs:
+  pytest:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pytest
+      - run: pytest -q
+      - run: python3 genconfig.py examples/deadchain.sample.toml --out /tmp/gen && test -s /tmp/gen/Merge.yaml
+        env: { HOME: /tmp/fakehome }
