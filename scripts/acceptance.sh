@@ -12,7 +12,7 @@ echo "隔离目录：$WORK"
 echo
 
 echo "== 1/4 单元测试 =="
-"$PY" -m pytest -q
+if "$PY" -c "import pytest" 2>/dev/null; then "$PY" -m pytest -q; else echo "（没有 pytest，用标准库 unittest）"; "$PY" -m unittest discover -s tests; fi
 echo
 
 echo "== 2/4 命令行增删 + 生成 =="

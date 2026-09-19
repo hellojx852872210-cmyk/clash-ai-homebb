@@ -5,7 +5,8 @@
 - 新增 `wizard.py` 交互式引导与命令行增删：粘贴 socks5 / http / vless / trojan / ss / vmess / hysteria2 分享链接、`host:port:user:pass` 简写或 JSON 即可添加家宽节点；家宽订阅、日常订阅随时增删；生成/安装一键完成。
 - `genconfig.py --install` 遇到被 uchg 锁住的目标文件时给出明确提示。
 - 向导菜单：任意提示处输入 b 返回、按编号/名字删除并二次确认、未保存改动提示、s 保存 / 0 保存退出 / q 不保存退出、Ctrl-C 不写文件、`--out` 指定生成目录。
-- 新增 `scripts/acceptance.sh` 本地验收脚本（隔离目录，不碰真实配置）。
+- 新增 `scripts/acceptance.sh` 本地验收脚本（隔离目录，不碰真实配置；没有 pytest 自动用 unittest）。
+- 新增 `start.py`：检测客户环境（系统/Python/curl/Clash Verge/内核/TUN/系统代理/端口/是否已装/锁/launchd）并按缺什么补什么一步步引导，`--check` 只出报告。
 
 ## 0.1.0 (2026-09-19)
 

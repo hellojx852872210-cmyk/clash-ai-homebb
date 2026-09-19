@@ -29,6 +29,13 @@ Claude / ChatGPT / Grok 这类服务对出口 IP 很敏感，机房 IP 容易被
 
 ```bash
 git clone https://github.com/hellojx852872210-cmyk/clash-ai-homebb && cd clash-ai-homebb
+python3 start.py                            # 检测环境 → 引导添加家宽/订阅 → 生成 → 安装 → 验证 → 上锁 → 装 launchd
+```
+
+`start.py` 先检测系统、Python、curl、Clash Verge 是否安装、内核是否在跑、TUN/系统代理、端口、是否已装过、是否上锁、launchd 等，打印一份报告，
+再按缺什么补什么一步步带你做，每步可跳过；`python3 start.py --check` 只检测不改动，提问题时把报告贴出来。手动等价步骤：
+
+```bash
 python3 wizard.py                            # 交互式引导：添加家宽节点/订阅、日常订阅，生成配置
 cat generated/INSTALL.md                    # 按步骤把 Merge/Script/providers 放进 Clash Verge
 cp generated/config.toml .                  # 监控用的配置
@@ -101,7 +108,8 @@ python3 watch.py --unpin        # 解锁 → 改配置 → 重新生成/粘贴 �
 ## 目录
 
 ```
-wizard.py                交互式引导 / 增删家宽与订阅（也可命令行）
+start.py                环境检测 + 全程引导（第一次运行这个）
+wizard.py                增删家宽与订阅（菜单 / 命令行）
 genconfig.py            生成 Merge.yaml / Script.js / providers / config.toml
 deadchain.example.toml  生成器输入示例
 templates/Script.js.tpl Script 模板
