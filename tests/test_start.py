@@ -56,7 +56,7 @@ class RenderTest(unittest.TestCase):
         self.assertIn("– TUN", text)
         self.assertIn("家宽暂时拨不通", text)
         self.assertIn("监控最近一轮  ok", text)
-        self.assertIn("出口 198.51.100.1", text)
+        self.assertIn("出口 IP 198.51.100.1", text)
 
 
 class GroupTest(unittest.TestCase):
