@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-09-19)
 
 - 向导：菜单上直接给出「下一步选什么」及理由，回车即按建议执行；每个输入处附示例；引导里的确认项标明推荐答案。
 - 新增 `wizard.py` 交互式引导与命令行增删：粘贴 socks5 / http / vless / trojan / ss / vmess / hysteria2 分享链接、`host:port:user:pass` 简写或 JSON 即可添加家宽节点；家宽订阅、日常订阅随时增删；生成/安装一键完成。
