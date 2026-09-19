@@ -60,8 +60,8 @@ class ProbeCfg:
 class AlertCfg:
     title: str = "Clash 家宽监控"
     realert_secs: int = 1800
-    # 这些状态常是几分钟内自愈的抖动：首次出现只观察一轮
-    debounce_codes: tuple[str, ...] = ("daily_down",)
+    # 这些状态常是几分钟内自愈的抖动（订阅节点抖、Verge 切换配置档时内核重载）：首次出现只观察一轮
+    debounce_codes: tuple[str, ...] = ("daily_down", "core_reloading", "clash_dead", "deadchain_broken")
     modal: bool = True
     sound: str = "Basso"
     # 可选 Telegram：两个环境变量都有值才发；不想要就留空

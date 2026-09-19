@@ -65,6 +65,10 @@ class EvaluateTest(unittest.TestCase):
         r = ev(base(ai_group_all=("RESIP-Claude", "DIRECT")))
         self.assertEqual((r.code, r.level), ("deadchain_broken", "crit"))
 
+    def test_missing_ai_group_is_core_reloading_not_broken(self):
+        r = ev(base(ai_group_type="", ai_group_all=(), ai_group_now=""))
+        self.assertEqual((r.code, r.level), ("core_reloading", "warn"))
+
     def test_deadchain_broken_if_ai_group_not_selector(self):
         r = ev(base(ai_group_type="Fallback"))
         self.assertEqual(r.code, "deadchain_broken")
@@ -159,6 +163,14 @@ class NotifyTest(unittest.TestCase):
 
     def test_recovery_notifies_after_real_alert(self):
         self.assertTrue(self.notify(Result("ok", "ok"), "daily_down", 0.0, 1000.0, alerted="daily_down"))
+
+    def test_default_debounce_covers_reload_class(self):
+        from config import Settings
+        d = Settings().alert.debounce_codes
+        for code in ("daily_down", "core_reloading", "clash_dead", "deadchain_broken"):
+            self.assertIn(code, d)
+        self.assertNotIn("config_tampered", d)
+        self.assertNotIn("leak_ai_via_daily", d)
 
     def test_non_debounced_code_alerts_immediately(self):
         self.assertTrue(self.notify(Result("config_tampered", "crit"), "ok", 0.0, 1000.0, alerted="ok"))
