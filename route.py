@@ -19,7 +19,6 @@ import argparse
 import collections
 import json
 import sys
-import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -29,7 +28,7 @@ import routes as R  # noqa: E402
 import ui  # noqa: E402
 from config import SETTINGS  # noqa: E402
 from egress import KIND_CN, classify, is_noise_host  # noqa: E402
-from watch import api_json, clash_reachable  # noqa: E402
+from watch import api_json  # noqa: E402
 
 
 # ---------------- 当前出口 ----------------
@@ -60,53 +59,13 @@ def live_apps() -> list[dict]:
 
 
 def installed() -> tuple[bool, str]:
-    """Clash 里是否已经装好三条 RULE-SET 覆盖规则。"""
-    if not clash_reachable():
-        return False, "mihomo 没在跑"
-    try:
-        names = {str(p) for p in (api_json("/providers/rules").get("providers") or {})}
-    except Exception:
-        return False, "读不到 mihomo 的规则集列表"
-    missing = [n for n in R.PROVIDER.values() if n not in names]
-    if missing:
-        return False, "Clash 里还没有覆盖规则集：" + ", ".join(missing)
-    return True, ""
+    return R.hook_installed()
 
 
 def apply_now(rs: list[R.Route]) -> None:
-    """写规则集文件 + 让 mihomo 立刻重读。
-
-    mihomo 也会自己监听文件变化（几秒内），PUT 只是把这件事立刻做掉，
-    这样命令一返回、新连接就按新出口走。
-    """
-    files = R.write_providers(rs)
-    ui.note(f"已写 {files['homebb'].parent}")
-    if not clash_reachable():
-        ui.note("mihomo 没在跑，下次启动后自动读取")
-        return
-    failed = []
-    for name in R.PROVIDER.values():
-        try:
-            api_json(f"/providers/rules/{urllib.parse.quote(name)}", method="PUT")
-        except Exception as e:
-            failed.append(f"{name}（{e}）")
-    if failed:
-        ui.fail("让 mihomo 重读失败：" + "; ".join(failed))
-        ui.note("文件已经写好，mihomo 几秒内会自己读到")
-        return
-    counts = {}
-    try:
-        for name, p in ((api_json("/providers/rules") or {}).get("providers") or {}).items():
-            if name in R.PROVIDER.values():
-                counts[name] = p.get("ruleCount")
-    except Exception:
-        pass
-    want = {R.PROVIDER[t]: sum(1 for x in rs if x.target == t) for t in R.TARGETS}
-    if counts == want:
-        ui.success("已生效：" + "  ".join(f"{R.TARGET_CN[t]} {want[R.PROVIDER[t]]} 条" for t in R.TARGETS))
-    elif counts:
-        ui.fail(f"生效条数对不上：Clash 里 {counts}，应为 {want}")
-    
+    ok, msg = R.apply(rs)
+    ui.note(f"已写 {R.rules_dir()}")
+    (ui.success if ok else ui.fail)(msg)
 
 
 # ---------------- 命令 ----------------

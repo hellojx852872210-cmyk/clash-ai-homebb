@@ -175,3 +175,50 @@ def write_providers(routes: list[Route], directory: Path | None = None) -> dict[
         p.write_text(render_payload(routes, t), encoding="utf-8")
         out[t] = p
     return out
+
+
+# ---------------- 让 mihomo 生效 ----------------
+def hook_installed(timeout: float = 5.0) -> tuple[bool, str]:
+    """Clash 里是否已经有这三个覆盖规则集。"""
+    from watch import api_json, clash_reachable
+
+    if not clash_reachable():
+        return False, "mihomo 没在跑"
+    try:
+        names = {str(n) for n in ((api_json("/providers/rules", timeout=timeout) or {}).get("providers") or {})}
+    except Exception:
+        return False, "读不到 mihomo 的规则集列表"
+    missing = [n for n in PROVIDER.values() if n not in names]
+    if missing:
+        return False, "Clash 里还没有覆盖规则集：" + ", ".join(missing)
+    return True, ""
+
+
+def apply(routes: list[Route], directory: Path | None = None) -> tuple[bool, str]:
+    """写规则集文件 + 让 mihomo 立刻重读。返回 (是否已生效, 给人看的一句话)。
+
+    mihomo 也会自己监听文件（几秒内），PUT 只是让它立刻发生，这样函数一返回新连接就按新出口走。
+    """
+    import urllib.parse
+
+    from watch import api_json, clash_reachable
+
+    write_providers(routes, directory)
+    if not clash_reachable():
+        return False, "已记下，mihomo 没在跑，下次启动后读取"
+    failed = []
+    for name in PROVIDER.values():
+        try:
+            api_json(f"/providers/rules/{urllib.parse.quote(name)}", method="PUT")
+        except Exception as e:
+            failed.append(f"{name}（{e}）")
+    if failed:
+        return False, "已写文件，但让 mihomo 重读失败：" + "; ".join(failed)
+    want = {PROVIDER[t]: sum(1 for r in routes if r.target == t) for t in TARGETS}
+    try:
+        got = {n: p.get("ruleCount") for n, p in ((api_json("/providers/rules") or {}).get("providers") or {}).items() if n in want}
+    except Exception:
+        return True, "已生效"
+    if got != want:
+        return False, f"生效条数对不上：Clash 里 {got}，应为 {want}"
+    return True, "已生效：" + "  ".join(f"{TARGET_CN[t]} {want[PROVIDER[t]]} 条" for t in TARGETS)

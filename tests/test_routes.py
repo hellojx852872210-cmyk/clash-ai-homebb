@@ -154,3 +154,107 @@ class GeneratedRuleOrderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HudChoiceTest(unittest.TestCase):
+    """悬浮窗点击后的逻辑（不含 AppKit）：写记忆、拒绝、清除、取消。"""
+
+    def setUp(self):
+        import importlib
+        import os
+        self.work = Path(tempfile.mkdtemp())
+        cfg = self.work / "cfg.toml"
+        cfg.write_text(f'[clash]\nsocket = "{self.work}/nope.sock"\ncontroller = ""\n'
+                       f'[routes]\nfile = "{self.work}/routes.toml"\ndir = "{self.work}/rules"\n', encoding="utf-8")
+        os.environ["CLASH_AI_HOMEBB_CONFIG"] = str(cfg)
+        import config
+        importlib.reload(config)
+        importlib.reload(R)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("flt", Path(__file__).resolve().parents[1] / "float.py")
+        self.flt = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.flt)
+
+    def tearDown(self):
+        import importlib
+        import os
+        os.environ.pop("CLASH_AI_HOMEBB_CONFIG", None)
+        import config
+        importlib.reload(config)
+        importlib.reload(R)
+
+    def routes(self):
+        return R.load_routes(self.work / "routes.toml")
+
+    def test_set_each_target(self):
+        for tag, want in ((1, "homebb"), (2, "direct"), (3, "daily")):
+            self.flt.choose_egress("PROCESS-NAME,Telegram", tag)
+            got = self.routes()
+            self.assertEqual([(r.match, r.target) for r in got], [("PROCESS-NAME,Telegram", want)], tag)
+        # 规则集文件同步写了
+        self.assertIn("Telegram", (self.work / "rules" / "user-daily.yaml").read_text(encoding="utf-8"))
+
+    def test_cancel_changes_nothing(self):
+        self.assertEqual(self.flt.choose_egress("PROCESS-NAME,X", 5), "")
+        self.assertEqual(self.routes(), [])
+
+    def test_clear_without_override(self):
+        self.assertEqual(self.flt.choose_egress("PROCESS-NAME,X", 4), "本来就没有覆盖")
+
+    def test_clear_after_set(self):
+        self.flt.choose_egress("PROCESS-NAME,X", 2)
+        self.assertEqual(len(self.routes()), 1)
+        self.flt.choose_egress("PROCESS-NAME,X", 4)
+        self.assertEqual(self.routes(), [])
+
+    def test_ai_domain_refused(self):
+        msg = self.flt.choose_egress("DOMAIN-SUFFIX,claude.ai", 2)
+        self.assertIn("AI", msg)
+        self.assertEqual(self.routes(), [])
+
+    def test_ai_pinned_app_warns(self):
+        # 让「写入并生效」这步成功，才看得到 AI 优先的提示（真机上 mihomo 在跑时就是这条路径）
+        real_apply = R.apply
+        R.apply = lambda rs, directory=None: (True, "已生效")
+        try:
+            warn = self.flt.choose_egress("PROCESS-PATH-REGEX,.*/Claude\\.app/", 2, ai_pinned=True)
+            plain = self.flt.choose_egress("PROCESS-NAME,Telegram", 2, ai_pinned=False)
+        finally:
+            R.apply = real_apply
+        self.assertIn("可能不生效", warn)
+        self.assertIn("直连", warn)
+        self.assertNotIn("可能不生效", plain)
+        self.assertIn("即刻生效", plain)
+
+    def test_apply_failure_is_reported(self):
+        real_apply = R.apply
+        R.apply = lambda rs, directory=None: (False, "让 mihomo 重读失败：X")
+        try:
+            msg = self.flt.choose_egress("PROCESS-NAME,Telegram", 1)
+        finally:
+            R.apply = real_apply
+        self.assertIn("失败", msg)
+        self.assertEqual(len(self.routes()), 1)  # 记忆仍然写下了
+
+    def test_bad_tag(self):
+        self.assertEqual(self.flt.choose_egress("PROCESS-NAME,X", 9), "")
+
+
+class AppMatcherTest(unittest.TestCase):
+    def matcher(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("flt2", Path(__file__).resolve().parents[1] / "float.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m.app_matcher
+
+    def test_gui_app_uses_bundle_path_regex(self):
+        f = self.matcher()
+        self.assertEqual(f("Google Chrome", "/Applications/Google Chrome.app"), r"PROCESS-PATH-REGEX,.*/Google Chrome\.app/")
+        # 元字符要转义，空格不用（两种写法内核都收，这里取干净的）
+        self.assertEqual(f("A+B (x)", "/Applications/A+B (x).app"), r"PROCESS-PATH-REGEX,.*/A\+B \(x\)\.app/")
+
+    def test_no_bundle_falls_back_to_process_name(self):
+        f = self.matcher()
+        self.assertEqual(f("curl", ""), "PROCESS-NAME,curl")
+        self.assertIsNone(f("", ""))
