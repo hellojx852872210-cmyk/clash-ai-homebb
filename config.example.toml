@@ -43,6 +43,11 @@ files = [
   "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/ai-homebb-providers/*.yaml",
 ]
 
+[routes]
+# 出口覆盖规则（route.py）：记忆文件与规则集目录。规则集必须放在 mihomo 数据目录之下
+file = "routes.toml"
+dir = "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/ai-homebb-rules"
+
 [hud]
 tick = 1.5
 stale_secs = 900

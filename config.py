@@ -76,6 +76,13 @@ class LockCfg:
 
 
 @dataclass(frozen=True)
+class RoutesCfg:
+    # 出口覆盖规则：记忆文件（相对本项目目录）与规则集目录（mihomo 要求在内核数据目录之下）
+    file: str = "routes.toml"
+    dir: str = "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/ai-homebb-rules"
+
+
+@dataclass(frozen=True)
 class HudCfg:
     tick: float = 1.5
     # state.json 超过这么久没更新，悬浮窗显示「监控失联」
@@ -108,6 +115,7 @@ class Settings:
     probe: ProbeCfg = field(default_factory=ProbeCfg)
     alert: AlertCfg = field(default_factory=AlertCfg)
     lock: LockCfg = field(default_factory=LockCfg)
+    routes: RoutesCfg = field(default_factory=RoutesCfg)
     hud: HudCfg = field(default_factory=HudCfg)
     config_path: str = ""
 
@@ -165,6 +173,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         probe=_build(ProbeCfg, data.get("probe")),
         alert=_build(AlertCfg, data.get("alert")),
         lock=_build(LockCfg, data.get("lock")),
+        routes=_build(RoutesCfg, data.get("routes")),
         hud=_build(HudCfg, data.get("hud")),
         config_path=str(p) if p else "",
     )

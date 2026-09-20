@@ -210,8 +210,11 @@ def clash_reachable() -> bool:
     return bool((c.socket and os.path.exists(c.socket)) or c.controller)
 
 
-def api_json(path: str, timeout: float = 5.0) -> Any:
-    """GET mihomo 控制器；unix socket 优先，其次 TCP controller（带 secret）。"""
+def api_json(path: str, timeout: float = 5.0, method: str = "GET") -> Any:
+    """请求 mihomo 控制器；unix socket 优先，其次 TCP controller（带 secret）。
+
+    空响应体（例如 PUT /providers/rules/<name> 的 204）返回 None。
+    """
     c = SETTINGS.clash
     headers = {}
     if c.socket and os.path.exists(c.socket):
@@ -224,12 +227,13 @@ def api_json(path: str, timeout: float = 5.0) -> Any:
     else:
         raise RuntimeError("没有可用的 mihomo 控制器（clash.socket / clash.controller 都为空）")
     try:
-        conn.request("GET", path, headers=headers)
+        conn.request(method, path, headers=headers)
         resp = conn.getresponse()
         body = resp.read()
-        if resp.status != 200:
+        if resp.status >= 300:
             raise RuntimeError(f"{path} HTTP {resp.status}")
-        return json.loads(body.decode())
+        text = body.decode().strip()
+        return json.loads(text) if text else None
     finally:
         conn.close()
 

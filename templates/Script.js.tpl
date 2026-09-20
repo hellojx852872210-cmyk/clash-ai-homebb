@@ -4,6 +4,7 @@
 // 3) 把「日常出口」插到 Proxies / GLOBAL 等选择组第一位。
 var NAMES = __NAMES__;
 var PROVIDERS = __PROVIDERS__;
+var RULE_PROVIDERS = __RULE_PROVIDERS__;
 var PROXIES = __PROXIES__;
 var GROUPS = __GROUPS__;
 
@@ -28,8 +29,13 @@ function consumeList(config, key, targetKey, prepend) {
 }
 
 function sanitizeRules(rules) {
-  // RULE-SET 依赖 rule-providers，Verge 不会把 Merge 的 rule-providers 带过来，留着会让内核拒载
-  return ensureArray(rules).filter(function (r) { return String(r).indexOf("RULE-SET,") !== 0; });
+  // 机场自带的 RULE-SET 依赖它自己的 rule-providers，留着会让内核拒载；
+  // 本项目的出口覆盖规则集（user-*）由下面统一补上，必须放行。
+  return ensureArray(rules).filter(function (r) {
+    var s = String(r);
+    if (s.indexOf("RULE-SET,") !== 0) return true;
+    return s.indexOf("RULE-SET,user-") === 0;
+  });
 }
 
 function ensureProxy(config, proxy) {
@@ -72,6 +78,10 @@ function main(config, profileName) {
   if (!pp || typeof pp !== "object" || Array.isArray(pp)) pp = {};
   for (var k in PROVIDERS) if (!pp[k]) pp[k] = PROVIDERS[k];
   config["proxy-providers"] = pp;
+  var rp = config["rule-providers"];
+  if (!rp || typeof rp !== "object" || Array.isArray(rp)) rp = {};
+  for (var rk in RULE_PROVIDERS) if (!rp[rk]) rp[rk] = RULE_PROVIDERS[rk];
+  config["rule-providers"] = rp;
   for (var i = 0; i < PROXIES.length; i++) ensureProxy(config, PROXIES[i]);
   for (var g = 0; g < GROUPS.length; g++) ensureGroup(config, GROUPS[g]);
   injectIntoSelectors(config, NAMES.daily);

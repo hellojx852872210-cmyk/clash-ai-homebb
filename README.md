@@ -24,6 +24,7 @@ Claude / ChatGPT / Grok 这类服务对出口 IP 很敏感，机房 IP 容易被
 | 告警 | 只走本机：状态切换弹通知 + 模态框，持续故障每 30 分钟再提醒，抖动先观察一轮 |
 | 悬浮窗 | 前台 App 的连接走了哪里：家宽 / 日常 / 直连 / 混合（混合时逐条标注） |
 | 锁 | `--pin` 给 Merge / Script / 订阅副本打 `uchg` 不可变标记并记 sha256；改了或标记丢了立刻告警 |
+| 改出口 | `route.py` 看谁在走哪，把某个 App / 域名改成家宽、直连或代理，记住并立刻生效 |
 
 ## 快速开始
 
@@ -65,6 +66,29 @@ python3 wizard.py generate            # 只写到 generated/；加 --install --y
 - **AI 域名 / 进程**、**必须直连的自家机 IP**、**DNS 是否随家宽 fail-closed**。
 
 改了 `deadchain.toml` 就重新生成；生成器默认只写到 `generated/`，加 `--install --yes` 才会覆盖 Verge 里的 Merge / Script（原文件备份）。
+
+## 改某个 App 的出口
+
+默认分流之外，想把某个 App 或域名单独摆到别的出口：
+
+```bash
+python3 route.py                      # 列出正在联网的 App 和它当前走的出口，选一个改
+python3 route.py set Telegram 家宽     # 也可以直接指定
+python3 route.py set github.com 直连
+python3 route.py set 203.0.113.9 代理
+python3 route.py list                 # 已记住的覆盖
+python3 route.py remove Telegram      # 取消，恢复默认分流
+python3 route.py status               # 现在谁走哪
+```
+
+改动记在 `routes.toml`，同时渲染成三个 mihomo 规则集文件（`ai-homebb-rules/user-{homebb,direct,daily}.yaml`）。
+mihomo 直接重读这三个文件，所以**不用解锁 Merge.yaml、不用重载整份配置、不会断开已有连接**，命令返回后新连接就按新出口走。
+重新生成配置时覆盖规则不会丢（`genconfig.py` 从 `routes.toml` 重新渲染）。
+
+三条 `RULE-SET` 规则排在 AI 死链规则之后，所以**覆盖规则改不动 AI 的出口**：把 `claude.ai` 设成直连会被直接拒绝，
+就算手改规则集文件塞进去也不会生效（实测如此）。这是有意的，死链优先。
+
+手工写 Merge.yaml 的人第一次要装一下规则集钩子：`python3 route.py hook` 会打印要贴的片段；用 `genconfig.py` 生成配置的不用管，生成器已经带上。
 
 ## 本地验收
 
@@ -110,6 +134,8 @@ python3 watch.py --unpin        # 解锁 → 改配置 → 重新生成/粘贴 �
 ```
 start.py                环境检测 + 全程引导（第一次运行这个）
 wizard.py                增删家宽与订阅（菜单 / 命令行）
+route.py                 看当前出口、把某个 App/域名改到家宽/直连/代理，并记住
+routes.py                覆盖规则的数据模型与规则集渲染
 genconfig.py            生成 Merge.yaml / Script.js / providers / config.toml
 deadchain.example.toml  生成器输入示例
 templates/Script.js.tpl Script 模板

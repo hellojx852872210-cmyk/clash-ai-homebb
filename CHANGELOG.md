@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- 新增 `route.py`：看当前哪个 App 走家宽/直连/代理，把它改到别的出口并记住。改动写进 `routes.toml`，
+  渲染成三个 classical 文件型规则集由 mihomo 直接重读，不用解锁 Merge.yaml、不重载整份配置、不断开已有连接。
+- 三条 `RULE-SET` 规则由生成器排在 AI 死链规则之后，覆盖规则改不动 AI 出口；把 AI 域名设成直连/代理会被拒绝。
+- `genconfig.py` 输出 `rule-providers` 与规则集文件，并在重新生成时保留已有覆盖；`Script.js` 放行 `RULE-SET,user-*` 并补齐 `rule-providers`。
+
 ## 0.2.0 (2026-09-19)
 
 - 向导：菜单上直接给出「下一步选什么」及理由，回车即按建议执行；每个输入处附示例；引导里的确认项标明推荐答案。

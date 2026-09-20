@@ -33,6 +33,21 @@ assert [x["name"] for x in s["daily"]["subscriptions"]] == ["机场A", "机场B"
 assert c["deadchain"]["homebb_members"] == ["家宽B"]
 print("产物校验通过")
 PYEOF
+echo "— 出口覆盖 route.py（只写隔离目录，不碰 Clash）—"
+printf '[routes]\nfile = "%s/routes.toml"\ndir = "%s/rules"\n' "$WORK" "$WORK" > "$WORK/route.toml"
+export CLASH_AI_HOMEBB_CONFIG="$WORK/route.toml"
+"$PY" route.py set Telegram 家宽 >/dev/null
+"$PY" route.py set github.com 直连 >/dev/null
+if "$PY" route.py set claude.ai 直连 >/dev/null 2>&1; then echo "AI 域名竟然被接受，应当拒绝"; exit 1; fi
+echo "  AI 域名改出口被拒绝（正确）"
+grep -q "PROCESS-NAME,Telegram" "$WORK/rules/user-homebb.yaml" || { echo "家宽规则集没写对"; exit 1; }
+grep -q "github.com" "$WORK/rules/user-direct.yaml" || { echo "直连规则集没写对"; exit 1; }
+echo "  规则集渲染正确"
+"$PY" route.py list | sed 's/^/  /'
+unset CLASH_AI_HOMEBB_CONFIG
+export CLASH_AI_HOMEBB_SPEC="$WORK/deadchain.toml"
+echo
+
 MIHOMO="/Applications/Clash Verge.app/Contents/MacOS/verge-mihomo"
 if [[ -x "$MIHOMO" ]]; then
   echo "（有 mihomo 内核，做一次真实 -t 校验）"

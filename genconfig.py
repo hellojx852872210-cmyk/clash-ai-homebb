@@ -18,6 +18,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 VERGE_DIR_DEFAULT = "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev"
 PROVIDERS_SUBDIR = "ai-homebb-providers"
+RULES_SUBDIR = "ai-homebb-rules"  # route.py 的出口覆盖规则集（不上锁，随时可改）
 EXCLUDE_INFO_NODES = "到期|流量|重置|获取|剩余|套餐|官网|Traffic|Expire|Reset"
 CHECK_URL = "http://www.gstatic.com/generate_204"
 
@@ -121,6 +122,12 @@ def build(spec: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
     if hb_sub:
         providers["homebb-sub"] = provider("homebb", hb_sub, "[home] ")
 
+    # 出口覆盖规则集：三个 classical 文件 provider，内容由 route.py / routes.toml 维护
+    rule_providers = {
+        name: {"type": "file", "behavior": "classical", "path": f"./{RULES_SUBDIR}/{name}.yaml"}
+        for name in ("user-homebb", "user-direct", "user-daily")
+    }
+
     ai = spec.get("ai") or {}
     domains = list(ai.get("domains") or DEFAULT_AI_DOMAINS)
     procs = list(ai.get("processes") or [])
@@ -158,6 +165,8 @@ def build(spec: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
     rules += [f"PROCESS-PATH-REGEX,{r},{AI}" for r in proc_re]
     rules += [f"DOMAIN-SUFFIX,{d},{AI}" for d in domains]
     rules += [f"IP-CIDR,{c},{AI},no-resolve" for c in DEFAULT_AI_IPCIDR]
+    # 用户覆盖：排在 AI 规则之后，所以改不动 AI 的出口（实测 claude.ai 写进 user-direct 仍走家宽）
+    rules += [f"RULE-SET,user-homebb,{AI}", "RULE-SET,user-direct,DIRECT", f"RULE-SET,user-daily,{DAILY}"]
     # 家宽入口域名/IP 直连，避免被 TUN 塞回代理
     for n in nodes:
         srv = str(n["server"])
@@ -180,6 +189,9 @@ def build(spec: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
         L.append("  route-exclude-address: " + j([f"{ip}/32" for ip in direct_ips]))
     L.append("proxy-providers:")
     for k, v in providers.items():
+        L.append(f"  {j(k)}: {j(v)}")
+    L.append("rule-providers:")
+    for k, v in rule_providers.items():
         L.append(f"  {j(k)}: {j(v)}")
     L.append("prepend-proxies:")
     for n in nodes:
@@ -208,6 +220,7 @@ def build(spec: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
     script = (
         tpl.replace("__NAMES__", j({"ai": AI, "homebb": HB, "daily": DAILY}))
         .replace("__PROVIDERS__", j(providers))
+        .replace("__RULE_PROVIDERS__", j(rule_providers))
         .replace("__PROXIES__", j(nodes))
         .replace("__GROUPS__", j(groups))
     )
@@ -234,6 +247,9 @@ def build(spec: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
         "[lock]",
         "files = " + j([f"{verge}/profiles/Merge.yaml", f"{verge}/profiles/Script.js", f"{verge}/{PROVIDERS_SUBDIR}/*.yaml"]),
         "",
+        "[routes]",
+        f"dir = {j(f'{verge}/{RULES_SUBDIR}')}",
+        "",
     ])
 
     install_md = f"""# 安装步骤
@@ -246,15 +262,24 @@ def build(spec: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
 4. 把 `config.toml` 放到本项目目录，然后 `python3 watch.py --pin` 上锁，`./install.sh` 装监控和悬浮窗。
 5. 验证：`curl -x http://127.0.0.1:{port} https://api.ipify.org` 应返回家宽 IP；`python3 watch.py` 应打印「正常」。
 """
-    return (
-        {"Merge.yaml": merge, "Script.js": script, "config.toml": cfg, "INSTALL.md": install_md},
-        copies,
-    )
+    files = {"Merge.yaml": merge, "Script.js": script, "config.toml": cfg, "INSTALL.md": install_md}
+    try:
+        sys.path.insert(0, str(HERE))
+        import routes as _routes
+
+        saved = _routes.load_routes()
+        for t in _routes.TARGETS:
+            files[f"{RULES_SUBDIR}/{_routes.PROVIDER[t]}.yaml"] = _routes.render_payload(saved, t)
+    except Exception:  # routes.py 不可用就给空规则集，功能仍然可装
+        for name in ("user-homebb", "user-direct", "user-daily"):
+            files[f"{RULES_SUBDIR}/{name}.yaml"] = "payload: []\n"
+    return (files, copies)
 
 
 def write_out(out: Path, files: dict[str, str], copies: list[tuple[Path, str]]) -> None:
     out.mkdir(parents=True, exist_ok=True)
     (out / PROVIDERS_SUBDIR).mkdir(exist_ok=True)
+    (out / RULES_SUBDIR).mkdir(exist_ok=True)
     for rel, text in files.items():
         (out / rel).write_text(text, encoding="utf-8")
     for src, rel in copies:
@@ -282,6 +307,16 @@ def install(out: Path, verge: Path, project: Path) -> None:
     for f in (out / PROVIDERS_SUBDIR).glob("*.yaml"):
         shutil.copy2(f, pdir / f.name)
         print(f"已写 {pdir / f.name}")
+    rdir = verge / RULES_SUBDIR
+    rdir.mkdir(exist_ok=True)
+    for f in (out / RULES_SUBDIR).glob("*.yaml"):
+        dst = rdir / f.name
+        # 已经有内容的覆盖规则集不动，避免重新生成时抹掉 route.py 记下的东西
+        if dst.exists() and "payload: []" in f.read_text(encoding="utf-8") and "payload: []" not in dst.read_text(encoding="utf-8"):
+            print(f"保留 {dst}（已有覆盖规则）")
+            continue
+        shutil.copy2(f, dst)
+        print(f"已写 {dst}")
     cfg = project / "config.toml"
     if cfg.exists():
         shutil.copy2(cfg, cfg.with_name(f"config.toml.bak-{ts}"))
