@@ -308,11 +308,12 @@ def run_hud() -> None:
     }
     pad_x, pad_y, stripe_w = 16, 12, 6
     BTN_H, BTN_GAP = 24, 6
+    DRAG_SLOP = 5  # 小于它的位移算手抖，不当拖动
     # (标题, tag, 宽度)：1/2/3 对应三个出口，4 清除覆盖，5 取消
     BTN_SPEC = [("家宽", 1, 62), ("直连", 2, 62), ("代理", 3, 62), ("清除覆盖", 4, 90), ("取消", 5, 62)]
     ROW1_W = sum(w for _, t, w in BTN_SPEC if t <= 3) + BTN_GAP * 2
 
-    shared = {"text": "检测中…", "color": "idle", "ctx": {}}
+    shared = {"text": "检测中…", "color": "idle", "ctx": {}, "hook": None}
     state = {"mode": "hud", "ctx": {}, "flash": "", "flash_until": 0.0, "pick_until": 0.0}
     lock = threading.Lock()
     title_font = NSFont.systemFontOfSize_weight_(17, NSFontWeightSemibold)
@@ -337,6 +338,7 @@ def run_hud() -> None:
         state["flash_until"] = time.time() + secs
 
     def poller() -> None:
+        n = 0
         while True:
             try:
                 text, color, ctx = snapshot_text()
@@ -345,6 +347,14 @@ def run_hud() -> None:
             except Exception:
                 with lock:
                     shared["text"], shared["color"] = "出口窗异常", "mixed"
+            if n % 10 == 0:  # 覆盖规则集装没装，后台顺手查，点击时就不用等网络了
+                try:
+                    with lock:
+                        shared["hook"] = R.hook_installed(timeout=1.5)
+                except Exception:
+                    with lock:
+                        shared["hook"] = None
+            n += 1
             time.sleep(TICK)
 
     # ---------- 点一下改出口 ----------
@@ -360,22 +370,26 @@ def run_hud() -> None:
     def open_picker() -> None:
         with lock:
             ctx = dict(shared.get("ctx") or {})
+            hook = shared.get("hook")
         if not ctx.get("match"):
             flash("这个窗口不支持改出口")
+            redraw()
             return
-        ok, why = R.hook_installed(timeout=1.5)
-        if not ok:
-            flash(why[:30] + "（见 route.py hook）")
+        if hook is not None and not hook[0]:
+            flash(hook[1][:30] + "（见 route.py hook）")
+            redraw()
             return
         state["ctx"] = ctx
         state["mode"] = "pick"
         state["pick_until"] = time.time() + 12
         state["flash"] = ""
+        redraw()  # 立刻展开，不等定时器
 
     def do_choose(tag: int) -> None:
         ctx = dict(state.get("ctx") or {})
         state["mode"] = "hud"
         if tag == 5:
+            redraw()
             return
 
         def work() -> None:  # 写文件 + 让 mihomo 重读，放后台，别卡住界面
@@ -387,6 +401,7 @@ def run_hud() -> None:
                 flash(msg[:36])
 
         flash("处理中…", 10.0)
+        redraw()  # 先收起按钮并给出反馈，写入在后台做
         threading.Thread(target=work, daemon=True).start()
 
     class RootView(NSView):
@@ -409,8 +424,16 @@ def run_hud() -> None:
         def mouseDragged_(self, ev):
             loc = NSEvent.mouseLocation()
             dx, dy = loc.x - self._start[0], loc.y - self._start[1]
-            if abs(dx) > 3 or abs(dy) > 3:
+            if not self._moved:
+                # 没越过阈值就当手抖，窗口纹丝不动，免得「点一下却漂了几像素」
+                if abs(dx) <= DRAG_SLOP and abs(dy) <= DRAG_SLOP:
+                    return
+                # 刚越过阈值：以此刻为新基准，之后跟手移动，不会突然跳 DRAG_SLOP 像素
                 self._moved = True
+                fr = panel.frame()
+                self._start = (loc.x, loc.y)
+                self._origin = (fr.origin.x, fr.origin.y)
+                return
             panel.setFrameOrigin_(NSMakePoint(self._origin[0] + dx, self._origin[1] + dy))
 
         def mouseUp_(self, ev):
@@ -491,62 +514,63 @@ def run_hud() -> None:
         second = f"现在 {cur}" + (f" · 已设为{had}" if had else "") + " · 选新出口"
         return f"{ctx.get('app') or '未知 App'}\n{second}"
 
-    class FloatUI(NSObject):
-        def init(self):
-            self = objc.super(FloatUI, self).init()
-            self.last = None
-            return self
+    ui_state = {"last": None}
 
+    def redraw() -> None:
+        """重画面板。定时器每 0.3 秒调一次；点击时也直接调，保证跟手。只在主线程调用。"""
+        now = time.time()
+        if state["mode"] == "pick" and now > state["pick_until"]:
+            state["mode"] = "hud"
+        picking = state["mode"] == "pick"
+        if picking:
+            text, color = pick_text(), "other"
+        else:
+            with lock:
+                text, color = shared["text"], shared["color"]
+            if state["flash"]:
+                if now < state["flash_until"]:
+                    text, color = text + "\n" + state["flash"], "other"
+                else:
+                    state["flash"] = ""
+        key = (text, color, picking)
+        if key == ui_state["last"]:
+            if not panel.isVisible():
+                panel.orderFrontRegardless()
+            return
+        ui_state["last"] = key
+        for b in buttons:
+            b.setHidden_(not picking)
+        lbl.setAttributedStringValue_(styled_text(text))
+        size = lbl.fittingSize()
+        extra = (BTN_H + BTN_GAP) * 2 if picking else 0
+        w = max(220, size.width + stripe_w + pad_x * 2)
+        if picking:
+            w = max(w, ROW1_W + stripe_w + pad_x * 2)
+        h = max(64, size.height + pad_y * 2 + extra)
+        fr = panel.frame()
+        panel.setFrame_display_(NSMakeRect(fr.origin.x, fr.origin.y, w, h), True)
+        root.setFrame_(NSMakeRect(0, 0, w, h))
+        bg.setFrame_(NSMakeRect(0, 0, w, h))
+        stripe.setFrame_(NSMakeRect(0, 0, stripe_w, h))
+        lbl.setFrame_(NSMakeRect(stripe_w + pad_x, pad_y + extra, size.width, size.height))
+        if picking:
+            x, y_top = stripe_w + pad_x, pad_y + BTN_H + BTN_GAP
+            for b, (_t, tag, width) in zip(buttons, BTN_SPEC):
+                if tag == 4:
+                    x = stripe_w + pad_x
+                b.setFrame_(NSMakeRect(x, y_top if tag <= 3 else pad_y, width, BTN_H))
+                x += width + BTN_GAP
+        r, g, bl = colors.get(color, colors["idle"])
+        stripe.setFillColor_(NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, bl, 1.0))
+        panel.orderFrontRegardless()
+
+    class FloatUI(NSObject):
         def tick_(self, timer):
-            now = time.time()
-            if state["mode"] == "pick" and now > state["pick_until"]:
-                state["mode"] = "hud"
-            picking = state["mode"] == "pick"
-            if picking:
-                text, color = pick_text(), "other"
-            else:
-                with lock:
-                    text, color = shared["text"], shared["color"]
-                if state["flash"]:
-                    if now < state["flash_until"]:
-                        text, color = text + "\n" + state["flash"], "other"
-                    else:
-                        state["flash"] = ""
-            key = (text, color, picking)
-            if key == self.last:
-                if not panel.isVisible():
-                    panel.orderFrontRegardless()
-                return
-            self.last = key
-            for b in buttons:
-                b.setHidden_(not picking)
-            lbl.setAttributedStringValue_(styled_text(text))
-            size = lbl.fittingSize()
-            extra = (BTN_H + BTN_GAP) * 2 if picking else 0
-            w = max(220, size.width + stripe_w + pad_x * 2)
-            if picking:
-                w = max(w, ROW1_W + stripe_w + pad_x * 2)
-            h = max(64, size.height + pad_y * 2 + extra)
-            fr = panel.frame()
-            panel.setFrame_display_(NSMakeRect(fr.origin.x, fr.origin.y, w, h), True)
-            root.setFrame_(NSMakeRect(0, 0, w, h))
-            bg.setFrame_(NSMakeRect(0, 0, w, h))
-            stripe.setFrame_(NSMakeRect(0, 0, stripe_w, h))
-            lbl.setFrame_(NSMakeRect(stripe_w + pad_x, pad_y + extra, size.width, size.height))
-            if picking:
-                x, y_top = stripe_w + pad_x, pad_y + BTN_H + BTN_GAP
-                for b, (_t, tag, width) in zip(buttons, BTN_SPEC):
-                    if tag == 4:
-                        x = stripe_w + pad_x
-                    b.setFrame_(NSMakeRect(x, y_top if tag <= 3 else pad_y, width, BTN_H))
-                    x += width + BTN_GAP
-            r, g, bl = colors.get(color, colors["idle"])
-            stripe.setFillColor_(NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, bl, 1.0))
-            panel.orderFrontRegardless()
+            redraw()
 
     ui = FloatUI.alloc().init()
     NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-        0.8, ui, "tick:", None, True
+        0.3, ui, "tick:", None, True
     )
     threading.Thread(target=poller, daemon=True).start()
     app.run()

@@ -1,0 +1,6 @@
+# 出口覆盖规则，由 route.py 维护。每条记「什么 → 走哪」。
+
+[[route]]
+match = "PROCESS-PATH-REGEX,.*/cmux\\.app/"
+target = "homebb"
+note = "2026-09-20 设为家宽"
