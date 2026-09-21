@@ -4,3 +4,18 @@
 match = "PROCESS-PATH-REGEX,.*/cmux\\.app/"
 target = "homebb"
 note = "2026-09-20 设为家宽"
+
+[[route]]
+match = "PROCESS-PATH-REGEX,.*/Google Chrome\\.app/"
+target = "daily"
+note = "2026-09-21 设为代理"
+
+[[route]]
+match = "PROCESS-PATH-REGEX,.*/Microsoft Edge\\.app/"
+target = "daily"
+note = "2026-09-21 设为代理"
+
+[[route]]
+match = "PROCESS-PATH-REGEX,.*/Battle\\.net\\.app/"
+target = "direct"
+note = "2026-09-21 设为直连"

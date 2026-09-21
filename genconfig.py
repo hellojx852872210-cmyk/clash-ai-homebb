@@ -139,10 +139,12 @@ def build(spec: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
     # ---------- groups ----------
     groups: list[dict] = []
     for n in sub_names:
+        # 粘住优先：闲时不测速，每 10 分钟一次，新节点要快 800ms 以上才值得换。
+        # url-test 默认的小 tolerance 会让出口 IP 每几分钟就跳一次，日常上网会被反复要求重新登录。
         groups.append({"name": f"{n}-自动", "type": "url-test", "use": [f"sub-{n}"], "url": CHECK_URL,
-                       "interval": 300, "tolerance": 100, "lazy": False})
+                       "interval": 600, "tolerance": 800, "lazy": True})
     groups.append({"name": DAILY_AUTO, "type": "fallback", "proxies": [f"{n}-自动" for n in sub_names],
-                   "url": CHECK_URL, "interval": 120, "lazy": False})
+                   "url": CHECK_URL, "interval": 300, "lazy": True})
     groups.append({"name": DAILY, "type": "select", "proxies": [DAILY_AUTO] + [f"{n}-自动" for n in sub_names]})
     hb_group: dict = {"name": HB, "type": "fallback", "url": CHECK_URL, "interval": 120, "lazy": False}
     if nodes:

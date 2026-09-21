@@ -19,7 +19,7 @@ from pathlib import Path
 
 import routes as R
 from config import SETTINGS
-from egress import KIND_CN, format_hud, is_terminal_app, match_conns, summarize
+from egress import KIND_CN, format_hud, is_ai_host, is_terminal_app, match_conns, summarize
 from watch import CODE_SHORT, STATE_PATH, api_json, clash_reachable
 
 WATCH_STALE_SECS = SETTINGS.hud.stale_secs
@@ -200,6 +200,28 @@ def pinned_by_ai(summary) -> bool:
     return any(ai in str(c) for c in (summary.chains or ()))
 
 
+MAX_TARGET_HOSTS = 5
+
+
+def target_count(ctx: dict) -> int:
+    """可选目标数：整个 App 一个，外加最近几个域名。"""
+    return 1 + len(list(ctx.get("hosts") or ())[:MAX_TARGET_HOSTS])
+
+
+def pick_target(ctx: dict, idx: int) -> tuple[str, str, str, bool]:
+    """第 idx 个目标（0 = 整个 App，1..n = 某个域名）。
+
+    返回 (匹配规则, 显示名, 它现在走的出口, 是否被 AI 规则钉住)。
+    浏览器里不同页面走不同出口时，用它单独调某个域名。
+    """
+    hosts = list(ctx.get("hosts") or ())[:MAX_TARGET_HOSTS]
+    if idx <= 0 or idx > len(hosts):
+        return (ctx.get("match") or "", ctx.get("app") or "整个 App",
+                ctx.get("kind") or "", bool(ctx.get("ai")))
+    host, kind = hosts[idx - 1]
+    return (f"DOMAIN-SUFFIX,{host}", host, kind, is_ai_host(host))
+
+
 def choose_egress(match: str, tag: int, ai_pinned: bool = False) -> str:
     """悬浮窗里点下某个按钮之后真正做的事。返回一句给人看的话（空串=什么也没做）。
 
@@ -234,7 +256,7 @@ def choose_egress(match: str, tag: int, ai_pinned: bool = False) -> str:
 def snapshot_text() -> tuple[str, str, dict]:
     name, path, pid = frontmost_app()
     conns = fetch_conns()
-    ctx = {"app": name, "path": path, "match": app_matcher(name, path), "kind": "", "ai": False}
+    ctx = {"app": name, "path": path, "match": app_matcher(name, path), "kind": "", "ai": False, "hosts": ()}
     if conns is None:
         return (*with_banner(f"{name or '系统'}\nClash 未开", "mixed"), ctx)
     extra_names: set[str] = set()
@@ -247,6 +269,7 @@ def snapshot_text() -> tuple[str, str, dict]:
     summary = summarize(matched)
     ctx["kind"] = summary.kind
     ctx["ai"] = pinned_by_ai(summary)
+    ctx["hosts"] = summary.host_kinds
     return (*with_banner(*format_hud(name, summary, app_path=path)), ctx)
 
 
@@ -310,11 +333,13 @@ def run_hud() -> None:
     BTN_H, BTN_GAP = 24, 6
     DRAG_SLOP = 5  # 小于它的位移算手抖，不当拖动
     # (标题, tag, 宽度)：1/2/3 对应三个出口，4 清除覆盖，5 取消
-    BTN_SPEC = [("家宽", 1, 62), ("直连", 2, 62), ("代理", 3, 62), ("清除覆盖", 4, 90), ("取消", 5, 62)]
+    BTN_SPEC = [("家宽", 1, 62), ("直连", 2, 62), ("代理", 3, 62),
+                ("换目标", 6, 62), ("清除覆盖", 4, 90), ("取消", 5, 62)]
     ROW1_W = sum(w for _, t, w in BTN_SPEC if t <= 3) + BTN_GAP * 2
+    ROW2_W = sum(w for _, t, w in BTN_SPEC if t > 3) + BTN_GAP * 2
 
     shared = {"text": "检测中…", "color": "idle", "ctx": {}, "hook": None}
-    state = {"mode": "hud", "ctx": {}, "flash": "", "flash_until": 0.0, "pick_until": 0.0}
+    state = {"mode": "hud", "ctx": {}, "flash": "", "flash_until": 0.0, "pick_until": 0.0, "tidx": 0}
     lock = threading.Lock()
     title_font = NSFont.systemFontOfSize_weight_(17, NSFontWeightSemibold)
     body_font = NSFont.systemFontOfSize_weight_(14, NSFontWeightRegular)
@@ -381,12 +406,19 @@ def run_hud() -> None:
             return
         state["ctx"] = ctx
         state["mode"] = "pick"
+        state["tidx"] = 0
         state["pick_until"] = time.time() + 12
         state["flash"] = ""
         redraw()  # 立刻展开，不等定时器
 
     def do_choose(tag: int) -> None:
         ctx = dict(state.get("ctx") or {})
+        if tag == 6:  # 换目标：整个 App ↔ 各个域名，面板不关
+            state["tidx"] = (state["tidx"] + 1) % max(1, target_count(ctx))
+            state["pick_until"] = time.time() + 12
+            redraw()
+            return
+        match, shown, _kind, ai = pick_target(ctx, state["tidx"])
         state["mode"] = "hud"
         if tag == 5:
             redraw()
@@ -394,13 +426,13 @@ def run_hud() -> None:
 
         def work() -> None:  # 写文件 + 让 mihomo 重读，放后台，别卡住界面
             try:
-                msg = choose_egress(ctx.get("match") or "", tag, bool(ctx.get("ai")))
+                msg = choose_egress(match, tag, ai)
             except Exception as e:
                 msg = f"出错：{e}"
             if msg:
-                flash(msg[:36])
+                flash(f"{shown}：{msg}"[:40])
 
-        flash("处理中…", 10.0)
+        flash(f"{shown} 处理中…"[:36], 10.0)
         redraw()  # 先收起按钮并给出反馈，写入在后台做
         threading.Thread(target=work, daemon=True).start()
 
@@ -509,10 +541,19 @@ def run_hud() -> None:
 
     def pick_text() -> str:
         ctx = state.get("ctx") or {}
-        cur = KIND_CN.get(ctx.get("kind") or "", "未知")
-        had = current_override(ctx.get("match") or "")
-        second = f"现在 {cur}" + (f" · 已设为{had}" if had else "") + " · 选新出口"
-        return f"{ctx.get('app') or '未知 App'}\n{second}"
+        idx = state.get("tidx", 0)
+        match, shown, kind, _ai = pick_target(ctx, idx)
+        n = target_count(ctx)
+        cur = KIND_CN.get(kind or "", "未知")
+        had = current_override(match)
+        head = f"{ctx.get('app') or '未知 App'}"
+        if idx > 0:
+            head += f"  ·  只改这个域名"
+        line2 = f"目标 {shown}"
+        if n > 1:
+            line2 += f" ({idx + 1}/{n})"
+        line3 = f"现在 {cur}" + (f" · 已设为{had}" if had else "") + " · 选新出口"
+        return f"{head}\n{line2}\n{line3}"
 
     ui_state = {"last": None}
 
@@ -545,7 +586,7 @@ def run_hud() -> None:
         extra = (BTN_H + BTN_GAP) * 2 if picking else 0
         w = max(220, size.width + stripe_w + pad_x * 2)
         if picking:
-            w = max(w, ROW1_W + stripe_w + pad_x * 2)
+            w = max(w, ROW1_W + stripe_w + pad_x * 2, ROW2_W + stripe_w + pad_x * 2)
         h = max(64, size.height + pad_y * 2 + extra)
         fr = panel.frame()
         panel.setFrame_display_(NSMakeRect(fr.origin.x, fr.origin.y, w, h), True)

@@ -258,3 +258,54 @@ class AppMatcherTest(unittest.TestCase):
         f = self.matcher()
         self.assertEqual(f("curl", ""), "PROCESS-NAME,curl")
         self.assertIsNone(f("", ""))
+
+
+class PickTargetTest(unittest.TestCase):
+    """悬浮窗「换目标」：整个 App ↔ 各个域名。浏览器里不同页面走不同出口时用它单独调。"""
+
+    def flt(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("flt3", Path(__file__).resolve().parents[1] / "float.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def ctx(self, hosts=(("ab.chatgpt.com", "homebb"), ("www.bing.com", "daily"))):
+        return {"app": "Microsoft Edge", "match": r"PROCESS-PATH-REGEX,.*/Microsoft Edge\.app/",
+                "kind": "mixed", "ai": False, "hosts": hosts}
+
+    def test_index_zero_is_whole_app(self):
+        m = self.flt()
+        match, shown, kind, ai = m.pick_target(self.ctx(), 0)
+        self.assertEqual(shown, "Microsoft Edge")
+        self.assertEqual(kind, "mixed")
+        self.assertTrue(match.startswith("PROCESS-PATH-REGEX"))
+
+    def test_index_selects_domain_with_its_own_kind(self):
+        m = self.flt()
+        self.assertEqual(m.pick_target(self.ctx(), 1)[:3], ("DOMAIN-SUFFIX,ab.chatgpt.com", "ab.chatgpt.com", "homebb"))
+        self.assertEqual(m.pick_target(self.ctx(), 2)[:3], ("DOMAIN-SUFFIX,www.bing.com", "www.bing.com", "daily"))
+
+    def test_ai_domain_flagged(self):
+        m = self.flt()
+        self.assertTrue(m.pick_target(self.ctx(), 1)[3])   # chatgpt 是 AI 域名
+        self.assertFalse(m.pick_target(self.ctx(), 2)[3])
+
+    def test_out_of_range_falls_back_to_app(self):
+        m = self.flt()
+        for idx in (-1, 3, 99):
+            self.assertEqual(m.pick_target(self.ctx(), idx)[1], "Microsoft Edge")
+
+    def test_count_and_host_cap(self):
+        m = self.flt()
+        self.assertEqual(m.target_count(self.ctx()), 3)
+        self.assertEqual(m.target_count({"app": "X", "hosts": ()}), 1)
+        many = tuple((f"h{i}.example.com", "daily") for i in range(20))
+        self.assertEqual(m.target_count(self.ctx(many)), 1 + m.MAX_TARGET_HOSTS)
+        self.assertEqual(m.pick_target(self.ctx(many), m.MAX_TARGET_HOSTS)[1], f"h{m.MAX_TARGET_HOSTS - 1}.example.com")
+
+    def test_domain_target_is_rejected_for_ai(self):
+        m = self.flt()
+        match = m.pick_target(self.ctx(), 1)[0]
+        self.assertIsNotNone(R.validate(match, "direct"))     # AI 域名不许离开家宽
+        self.assertIsNone(R.validate(m.pick_target(self.ctx(), 2)[0], "direct"))
