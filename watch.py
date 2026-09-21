@@ -186,7 +186,9 @@ def evaluate(snapshot: Snapshot, policy: Policy | None = None) -> Result:
     if missing:
         return Result("direct_route_missing", "crit", "; ".join(missing))
     if not snapshot.daily_ip:
-        return Result("daily_down", "crit")
+        # 家宽走的是另一条入口。它还通 → 机场线路的事；它也不通 → 多半是本机上行断了
+        return Result("daily_down", "crit",
+                      "家宽仍通，是订阅线路的问题" if snapshot.homebb_ip else "家宽也不通，多半是本机上行断了")
     if not snapshot.homebb_ip:
         return Result("homebb_down", "warn")
     return Result("ok", "ok", f"家宽 {snapshot.homebb_ip} / 日常 {snapshot.daily_ip}")
