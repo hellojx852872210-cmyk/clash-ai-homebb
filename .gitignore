@@ -13,6 +13,7 @@ watch.launchd.err
 float.launchd.out
 float.launchd.err
 /generated/
+/dist/
 _refactor-bak/
 *.bak-*
 .DS_Store

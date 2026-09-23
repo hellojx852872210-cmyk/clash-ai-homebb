@@ -104,6 +104,23 @@ mihomo 直接重读这三个文件，所以**不用解锁 Merge.yaml、不用重
 
 手工写 Merge.yaml 的人第一次要装一下规则集钩子：`python3 route.py hook` 会打印要贴的片段；用 `genconfig.py` 生成配置的不用管，生成器已经带上。
 
+## 桌面 App
+
+不想记命令，就包成一个能双击的 App：
+
+```bash
+./scripts/build-app.sh          # 生成「家宽选择器.app」并装进 /Applications（--no-install 只生成到 dist/）
+```
+
+打开后一个窗口看全：当前判级、家宽 / 日常出口 IP、AI 链路、配置锁、上次检查时间。
+下面两个开关分别管监控和悬浮窗；右下「一键启用」全部打开（都开着时变成「全部停用」），「立即检查」马上跑一轮。
+
+- 开关直接操作 launchd：停用 = `bootout` + `disable`，下次登录也不会自己起来；启用 = `enable` + `bootstrap`，还没装过就按 `launchd/` 模板现装。
+- **停用不改 Clash 配置，AI 仍然只走家宽**，只是没人盯、没悬浮窗了；监控停着时顶部会标明「这是停用前最后一次的结果」。
+- 按 plist 里的脚本路径认任务，不按 label：早先手装、label 不同的任务也能管，不会再装出第二份（两份悬浮窗会互相杀）。
+- App 里只有启动脚本和图标，代码从本项目目录跑：改代码不用重装，挪了项目目录重跑一次 `build-app.sh`。
+- 命令行等价：`python3 agents.py [status|enable|disable] [watch|float]`，`python3 panel.py --summary` 打印面板内容。
+
 ## 本地验收
 
 改了向导或生成器之后，不必碰真实配置就能完整过一遍：
@@ -123,6 +140,7 @@ python3 watch.py                # 跑一轮，打印判级
 python3 watch.py --json         # 完整快照
 python3 watch.py --print-config # 生效配置
 python3 watch.py --unpin        # 解锁 → 改配置 → 重新生成/粘贴 → python3 watch.py --pin
+python3 agents.py               # 监控 / 悬浮窗任务的状态；enable / disable 启停
 ./uninstall.sh                  # 卸载 launchd 任务
 ```
 
@@ -131,7 +149,7 @@ python3 watch.py --unpin        # 解锁 → 改配置 → 重新生成/粘贴 �
 ## 要求
 
 - macOS（launchd、`chflags uchg`、`osascript`、AppKit）
-- Python 3.11+（`tomllib`）；悬浮窗额外需要 `pip install pyobjc-framework-Cocoa`
+- Python 3.11+（`tomllib`）；悬浮窗和桌面 App 额外需要 `pip install pyobjc-framework-Cocoa`
 - Clash Verge Rev（用它的 unix socket 控制器；其它 mihomo 客户端可在 `config.toml` 里改成 TCP controller + secret）
 - `curl`
 
@@ -142,6 +160,8 @@ python3 watch.py --unpin        # 解锁 → 改配置 → 重新生成/粘贴 �
 - 浏览器自带 DoH + ECH 会让 SNI 变成 `cloudflare-ech.com`，域名规则匹配不到；系统代理模式下浏览器把域名交给 Clash 所以没问题，TUN 模式下建议关掉浏览器的 Secure DNS。
 - 悬浮窗按进程归属连接，终端类 App 会把子进程（如 CLI 工具）一并算进去。
 - provider 文件必须放在 mihomo 的数据目录之下（安全路径限制），生成器和安装说明已按此处理。
+- 用 python.org 安装包的 Python 跑的任务，归系统设置「登录项与扩展 → 允许在后台」里的「Python Software Foundation」开关管；
+  它关着时开机不会自动启动（手动启用能跑，重启又没了），监控和悬浮窗的 plist 里最好用 Homebrew 的 Python。
 
 ## 目录
 
@@ -155,10 +175,13 @@ deadchain.example.toml  生成器输入示例
 templates/Script.js.tpl Script 模板
 watch.py                监控 + 锁（launchd 每 3 分钟）
 float.py                悬浮窗
+panel.py                桌面控制面板（scripts/build-app.sh 包成「家宽选择器.app」）
+agents.py               监控 / 悬浮窗 launchd 任务的查看、启用、停用
 egress.py               连接表 → 出口摘要
 config.py               config.toml 加载
 config.example.toml     监控配置示例
 launchd/ install.sh uninstall.sh
+scripts/                build-app.sh 打包 App、make_icon.py 画图标、acceptance.sh 本地验收
 tests/                  pytest
 ```
 
