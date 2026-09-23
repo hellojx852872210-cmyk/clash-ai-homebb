@@ -14,16 +14,21 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from verge import VERGE_DIR_DEFAULT
+
 HERE = Path(__file__).resolve().parent
 ENV_CONFIG = "CLASH_AI_HOMEBB_CONFIG"
 
 
 @dataclass(frozen=True)
 class ClashCfg:
-    # mihomo 控制器：优先 unix socket（Clash Verge Rev 默认），否则用 controller + secret
-    socket: str = "/tmp/verge/verge-mihomo.sock"
+    # mihomo 控制器：写了就先试它；auto_discover 时再按 Verge 各版本的位置自动找（见 verge.py），
+    # 以 /version 有响应为准。一般留空即可。
+    socket: str = ""
     controller: str = ""
     secret: str = ""
+    auto_discover: bool = True
+    verge_dir: str = VERGE_DIR_DEFAULT
     # 日常出口入站口（mixed-port）与家宽专用入站口（listeners 里指向家宽组的口）
     daily_proxy: str = "http://127.0.0.1:7897"
     homebb_proxy: str = "http://127.0.0.1:7901"
@@ -61,7 +66,7 @@ class AlertCfg:
     title: str = "Clash 家宽监控"
     realert_secs: int = 1800
     # 这些状态常是几分钟内自愈的抖动（订阅节点抖、Verge 切换配置档时内核重载）：首次出现只观察一轮
-    debounce_codes: tuple[str, ...] = ("daily_down", "core_reloading", "clash_dead", "deadchain_broken")
+    debounce_codes: tuple[str, ...] = ("daily_down", "core_reloading", "clash_dead", "deadchain_broken", "verge_service_failed")
     modal: bool = True
     sound: str = "Basso"
     # 可选 Telegram：两个环境变量都有值才发；不想要就留空
@@ -79,7 +84,9 @@ class LockCfg:
 class RoutesCfg:
     # 出口覆盖规则：记忆文件（相对本项目目录）与规则集目录（mihomo 要求在内核数据目录之下）
     file: str = "routes.toml"
-    dir: str = "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/ai-homebb-rules"
+    dir: str = f"{VERGE_DIR_DEFAULT}/ai-homebb-rules"
+    # 改出口时临时在 127.0.0.1 上提供规则集给内核拉取的端口（Merge 里 rule-providers 的 url 用它）
+    serve_port: int = 7919
 
 
 @dataclass(frozen=True)

@@ -6,9 +6,11 @@
   * AI 域名 / 家宽入站口（homebb_proxy）只允许走家宽组，家宽挂了就是断线，绝不回落到日常或直连；
   * 家宽出口 IP 和日常出口 IP 不能相同（撞 IP 就是死链失效）。
 本脚本只探测、判级、告警，不改任何路由；路由在 Clash 的 Merge/Script 里（见 examples/）。
+唯一的写操作：内核里的出口覆盖规则和 routes.toml 不一致时按记忆重推一次（routes.resync），不改记忆本身。
 
 告警只走本机：状态切换时通知 + 模态框；持续非正常每 realert_secs 再提醒；抖动类状态先观察一轮。
 配置锁：--pin 给 lock.files 打 uchg 不可变标记并记 sha256，每轮校验，丢标记/改内容 → config_tampered。
+Verge 服务要复制的文件（订阅副本）不上 uchg、只记 sha256；控制器位置、服务模式失败见 verge.py。
 所有可变项见 config.toml（config.example.toml 有注释）。
 """
 from __future__ import annotations
@@ -30,7 +32,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config import SETTINGS, Settings, expand_files
+import config as _config
+import verge
+from config import SETTINGS, Settings, expand_files, expand_path
 
 HERE = Path(__file__).resolve().parent
 STATE_PATH = HERE / "state.json"
@@ -48,6 +52,7 @@ CODE_CN = {
     "deadchain_broken": "死链结构被改（AI 组 / 家宽组不是预期形态）",
     "config_tampered": "上锁的配置被改或锁标记丢了",
     "direct_route_missing": "自家机直连的 TUN exclude / 网卡路由丢了",
+    "verge_service_failed": "Verge 服务模式起不来内核，退回了 sidecar，虚拟网卡(TUN)不可用",
     "daily_down": "日常出口出不了网（所有订阅都不通）",
 }
 CODE_SHORT = {
@@ -60,6 +65,7 @@ CODE_SHORT = {
     "deadchain_broken": "死链结构被改",
     "config_tampered": "配置被改/锁标记丢",
     "direct_route_missing": "自家机直连路由丢",
+    "verge_service_failed": "Verge 服务失败，TUN 不可用",
     "daily_down": "日常出口断线（订阅全不通）",
 }
 
@@ -111,6 +117,7 @@ class Snapshot:
     )
     lock_ok: bool = True
     lock_detail: str = ""
+    verge_error: str = ""  # Verge 日志里服务启动内核失败的原因（内核不在服务模式时才有）
 
 
 @dataclass(frozen=True)
@@ -147,10 +154,14 @@ def should_notify(
     return result.level != "ok" and (now - last_alert_ts) >= realert_secs
 
 
+def _verge_detail(reason: str) -> str:
+    return f"{reason[:200]}。{verge.failure_hint(reason)}" if reason else ""
+
+
 def evaluate(snapshot: Snapshot, policy: Policy | None = None) -> Result:
     p = policy or DEFAULT_POLICY
     if not snapshot.clash_up:
-        return Result("clash_dead", "crit")
+        return Result("clash_dead", "crit", _verge_detail(snapshot.verge_error))
     if not snapshot.lock_ok:
         return Result("config_tampered", "crit", snapshot.lock_detail)
     if not snapshot.ai_group_type and not snapshot.ai_group_all:
@@ -176,15 +187,25 @@ def evaluate(snapshot: Snapshot, policy: Policy | None = None) -> Result:
             "crit",
             f"{p.homebb_group} {snapshot.homebb_type} {hb} {tuple(snapshot.homebb_member_types)}",
         )
+    if snapshot.verge_error:
+        # 排在泄漏/死链检查之后：内核退回 sidecar 时代理口照常工作，真泄漏了要先报泄漏
+        return Result("verge_service_failed", "crit", _verge_detail(snapshot.verge_error))
     missing: list[str] = []
+    not_excluded: list[str] = []
     exclude = set(snapshot.tun_exclude)
     for ip in p.direct_ips:
         if f"{ip}/32" not in exclude:
             missing.append(f"{ip} 不在 exclude")
+            not_excluded.append(f"{ip}/32")
         elif snapshot.direct_ifaces.get(ip) != p.uplink_interface:
             missing.append(f"{ip}→{snapshot.direct_ifaces.get(ip) or '?'}")
     if missing:
-        return Result("direct_route_missing", "crit", "; ".join(missing))
+        detail = "; ".join(missing)
+        if not_excluded:
+            # Verge 2.5.5 起 Merge 里的 tun.route-exclude-address 会被 Verge 自己的 TUN 设置盖掉
+            detail += ("。Verge 以自己的 TUN 设置为准：设置 → 虚拟网卡模式（齿轮）→ 排除自定义网段，在原有内容后加上 "
+                       + ",".join(not_excluded))
+        return Result("direct_route_missing", "crit", detail)
     if not snapshot.daily_ip:
         # 家宽走的是另一条入口。它还通 → 机场线路的事；它也不通 → 多半是本机上行断了
         return Result("daily_down", "crit",
@@ -207,27 +228,15 @@ class UnixHTTPConnection(http.client.HTTPConnection):
         self.sock = sock
 
 
-def clash_reachable() -> bool:
-    c = SETTINGS.clash
-    return bool((c.socket and os.path.exists(c.socket)) or c.controller)
-
-
-def api_json(path: str, timeout: float = 5.0, method: str = "GET") -> Any:
-    """请求 mihomo 控制器；unix socket 优先，其次 TCP controller（带 secret）。
-
-    空响应体（例如 PUT /providers/rules/<name> 的 204）返回 None。
-    """
-    c = SETTINGS.clash
+def _request(ctl: verge.Controller, path: str, timeout: float, method: str) -> Any:
     headers = {}
-    if c.socket and os.path.exists(c.socket):
-        conn: http.client.HTTPConnection = UnixHTTPConnection(c.socket, timeout=timeout)
-    elif c.controller:
-        host, _, port = c.controller.rpartition(":")
-        conn = http.client.HTTPConnection(host or "127.0.0.1", int(port or 9090), timeout=timeout)
-        if c.secret:
-            headers["Authorization"] = f"Bearer {c.secret}"
+    if ctl.kind == "unix":
+        conn: http.client.HTTPConnection = UnixHTTPConnection(ctl.address, timeout=timeout)
     else:
-        raise RuntimeError("没有可用的 mihomo 控制器（clash.socket / clash.controller 都为空）")
+        host, _, port = ctl.address.rpartition(":")
+        conn = http.client.HTTPConnection(host or "127.0.0.1", int(port or 9090), timeout=timeout)
+        if ctl.secret:
+            headers["Authorization"] = f"Bearer {ctl.secret}"
     try:
         conn.request(method, path, headers=headers)
         resp = conn.getresponse()
@@ -238,6 +247,69 @@ def api_json(path: str, timeout: float = 5.0, method: str = "GET") -> Any:
         return json.loads(text) if text else None
     finally:
         conn.close()
+
+
+# 找到的控制器缓存在进程里；悬浮窗这种常驻进程在 Verge 重启、切换服务/sidecar 后会自己重新找。
+# 每次现读 config.SETTINGS（不用模块级 SETTINGS），测试 reload config 后立即生效。
+_ACTIVE: verge.Controller | None = None
+
+
+def controller_candidates() -> list[verge.Controller]:
+    c = _config.SETTINGS.clash
+    vdir = _config.expand_path(c.verge_dir)
+    return verge.candidates(
+        c.socket, c.controller, c.secret,
+        auto=c.auto_discover,
+        verge_conf=verge.read_verge_config(vdir) if c.auto_discover else None,
+        tmpdir=verge.user_temp_dir() if c.auto_discover else "",
+    )
+
+
+def find_controller(timeout: float = 1.5) -> verge.Controller | None:
+    """逐个试 /version，返回第一个真有响应的（socket 文件在不代表内核在：sidecar 退出后会留下死 socket）。"""
+    global _ACTIVE
+    for ctl in controller_candidates():
+        try:
+            v = _request(ctl, "/version", timeout, "GET")
+        except Exception:
+            continue
+        if isinstance(v, dict) and v.get("version"):
+            _ACTIVE = ctl
+            return ctl
+    _ACTIVE = None
+    return None
+
+
+def active_controller() -> verge.Controller | None:
+    return _ACTIVE
+
+
+def clash_reachable() -> bool:
+    if _ACTIVE is not None:
+        try:
+            _request(_ACTIVE, "/version", 1.5, "GET")
+            return True
+        except Exception:
+            pass
+    return find_controller() is not None
+
+
+def api_json(path: str, timeout: float = 5.0, method: str = "GET") -> Any:
+    """请求 mihomo 控制器（自动发现，见 find_controller）。
+
+    空响应体（例如 PUT /providers/rules/<name> 的 204）返回 None。
+    """
+    ctl = _ACTIVE or find_controller()
+    if ctl is None:
+        tried = "、".join(x.address for x in controller_candidates()) or "（没有候选）"
+        raise RuntimeError(f"连不上 mihomo 控制器，试过：{tried}")
+    try:
+        return _request(ctl, path, timeout, method)
+    except (OSError, http.client.HTTPException):
+        again = find_controller()
+        if again is None or again == ctl:
+            raise
+        return _request(again, path, timeout, method)
 
 
 unix_json = api_json  # 兼容旧调用
@@ -333,6 +405,10 @@ def probe(policy: Policy | None = None) -> Snapshot:
         except Exception:
             clash_up = False
     lock_ok, lock_detail = check_lock()
+    verge_error = verge.service_failure(verge.read_log_tail(expand_path(SETTINGS.clash.verge_dir)))
+    ctl = active_controller()
+    if clash_up and ctl is not None and ctl.is_service:
+        verge_error = ""  # 内核就在服务模式，日志里的失败是旧事
     direct_ifaces = {ip: route_iface(ip) for ip in p.direct_ips}
     daily_ip = curl_ip(c.daily_proxy) if clash_up else None
     homebb_ip = curl_ip(c.homebb_proxy) if clash_up else None
@@ -359,6 +435,7 @@ def probe(policy: Policy | None = None) -> Snapshot:
         homebb_member_types=hb_member_types,
         lock_ok=lock_ok,
         lock_detail=lock_detail,
+        verge_error=verge_error,
     )
 
 
@@ -382,8 +459,17 @@ def is_immutable(path: Path) -> bool:
         return False
 
 
+def runtime_assets() -> set[Path] | None:
+    return verge.file_asset_paths(expand_path(SETTINGS.clash.verge_dir))
+
+
+def uchg_allowed(path: Path, assets: set[Path] | None = None) -> bool:
+    """Verge 服务要复制进 runtime 目录的文件（file 型订阅副本）不能上 uchg，只记 sha256，见 verge.is_runtime_asset。"""
+    return not verge.is_runtime_asset(path, expand_path(SETTINGS.clash.verge_dir), assets)
+
+
 def check_lock() -> tuple[bool, str]:
-    """lock.json 记的每个文件：必须存在、带 uchg、sha256 一致；且清单要和 config 一致。"""
+    """lock.json 记的每个文件：必须存在、sha256 一致、该带 uchg 的带着（订阅副本反而不能带）；且清单要和 config 一致。"""
     configured = locked_files()
     if not configured:
         return True, ""
@@ -398,13 +484,17 @@ def check_lock() -> tuple[bool, str]:
     problems: list[str] = []
     if {str(p) for p in configured} != set(expected):
         problems.append("锁清单与 config 不一致，重新 --pin")
+    assets = runtime_assets()
     for raw, sha in expected.items():
         p = Path(raw)
         name = p.name
         if not p.exists():
             problems.append(f"{name} 不存在")
             continue
-        if not is_immutable(p):
+        if not uchg_allowed(p, assets):
+            if is_immutable(p):
+                problems.append(f"{name} 带 uchg，Verge 服务模式会因此起不来内核、TUN 开不了；跑 watch.py --migrate-lock")
+        elif not is_immutable(p):
             problems.append(f"{name} 锁标记(uchg)丢了")
         if file_sha256(p) != sha:
             problems.append(f"{name} 内容变了")
@@ -417,19 +507,57 @@ def pin_lock() -> int:
     if not targets:
         print("config 的 [lock].files 为空，没有要锁的文件")
         return 1
+    assets = runtime_assets()
     for p in targets:
         if not p.exists():
             print(f"缺文件: {p}")
             return 1
         files[str(p)] = file_sha256(p)
-        os.chflags(p, p.stat().st_flags | stat.UF_IMMUTABLE)
-        print(f"锁定 {p.name}  uchg=on  sha256={files[str(p)][:16]}…")
+        if uchg_allowed(p, assets):
+            os.chflags(p, p.stat().st_flags | stat.UF_IMMUTABLE)
+            print(f"锁定 {p.name}  uchg=on  sha256={files[str(p)][:16]}…")
+        else:
+            if is_immutable(p):
+                os.chflags(p, p.stat().st_flags & ~stat.UF_IMMUTABLE)
+            print(f"记录 {p.name}  只记 sha256（Verge 服务要复制它，不能上 uchg）  sha256={files[str(p)][:16]}…")
     LOCK_PATH.write_text(
         json.dumps({"pinned_at": datetime.now(timezone.utc).isoformat(), "files": files}, ensure_ascii=False, indent=2)
         + "\n"
     )
     print(f"已写 {LOCK_PATH}")
     return 0
+
+
+def migrate_lock() -> int:
+    """只解开 Verge 服务要复制的文件上的 uchg，不重算、不改 lock.json 里的 sha256。
+
+    和 --pin 不同：--pin 会把所有文件的当前内容重新记为「可信」，迁移时不该顺手认可别的改动。
+    记过 sha256 的文件内容对不上就不动它，先让人核对。
+    """
+    assets = runtime_assets()
+    try:
+        expected = (json.loads(LOCK_PATH.read_text()).get("files") or {}) if LOCK_PATH.exists() else {}
+    except json.JSONDecodeError:
+        expected = {}
+    recorded = {str(Path(k).resolve()): v for k, v in expected.items()}
+    targets = {p.resolve() for p in (assets or ())}
+    targets |= {Path(raw).resolve() for raw in expected if not uchg_allowed(Path(raw), assets)}
+    bad = 0
+    changed = 0
+    for p in sorted(targets):
+        if not p.exists() or not is_immutable(p):
+            continue
+        sha = recorded.get(str(p))
+        if sha and file_sha256(p) != sha:
+            print(f"跳过 {p.name}：内容和上锁时记录的不一致，先核对再处理")
+            bad += 1
+            continue
+        os.chflags(p, p.stat().st_flags & ~stat.UF_IMMUTABLE)
+        print(f"解开 {p.name}  uchg=off（Verge 服务要复制它；sha256 校验照旧）")
+        changed += 1
+    if not changed and not bad:
+        print("没有需要迁移的文件")
+    return 1 if bad else 0
 
 
 def unpin_lock() -> int:
@@ -460,6 +588,8 @@ def save_state(result: Result, snap: Snapshot, last_alert_ts: float = 0.0, alert
         "alerted_code": alerted_code,
         "lock_ok": snap.lock_ok,
         "lock_detail": snap.lock_detail,
+        "verge_error": snap.verge_error,
+        "controller": (active_controller() or verge.Controller("", "")).label(),
         "daily_ip": snap.daily_ip,
         "homebb_ip": snap.homebb_ip,
         "ai_via_daily": snap.ai_via_daily,
@@ -528,6 +658,15 @@ def alert(result: Result, first: bool = True) -> None:
 def run_once(*, as_json: bool) -> int:
     snap = probe()
     result = evaluate(snap)
+    if snap.clash_up:
+        try:
+            import routes as _routes
+
+            note = _routes.resync()
+        except Exception as e:  # 自检出错不影响本轮监控
+            note = f"覆盖规则集自检出错：{e}"
+        if note:
+            log_line(note)
     state = load_state()
     prev = state.get("code")
     alerted = state.get("alerted_code") or prev
@@ -566,6 +705,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--interval", type=int, default=180, help="--loop 间隔秒")
     p.add_argument("--pin", action="store_true", help="给 [lock].files 打 uchg 锁并记录 sha256")
     p.add_argument("--unpin", action="store_true", help="解除 uchg 锁（改完要再 --pin）")
+    p.add_argument("--migrate-lock", action="store_true",
+                   help="只解开 Verge 服务要复制的文件（file 型订阅副本）上的 uchg，不改记录的 sha256")
     p.add_argument("--print-config", action="store_true", help="打印生效配置")
     args = p.parse_args(argv)
     if args.print_config:
@@ -574,6 +715,8 @@ def main(argv: list[str] | None = None) -> int:
         return pin_lock()
     if args.unpin:
         return unpin_lock()
+    if args.migrate_lock:
+        return migrate_lock()
     if args.loop:
         while True:
             run_once(as_json=args.json)

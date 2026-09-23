@@ -5,6 +5,7 @@ __pycache__/
 config.toml
 deadchain.toml
 routes.toml
+.routes-pushed.json
 lock.json
 state.json
 watch.log

@@ -2,10 +2,13 @@
 # 每一项都有默认值，只写你要改的即可。路径支持 ~ 和 glob。
 
 [clash]
-# mihomo 控制器：Clash Verge Rev 默认提供 unix socket；其它客户端可改用 controller + secret
-socket = "/tmp/verge/verge-mihomo.sock"
+# mihomo 控制器：默认自动找（Verge 2.5.5 服务模式 / sidecar、2.5.2 及更早的位置、Verge config.yaml 里的 TCP 控制器），
+# 以 /version 有响应为准，一般不用写。写了的最先试；其它 mihomo 客户端写 controller + secret
+# socket = "/var/run/clash-verge-service/users/501/verge-mihomo.sock"
 # controller = "127.0.0.1:9097"
 # secret = ""
+# auto_discover = true
+# verge_dir = "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev"
 daily_proxy = "http://127.0.0.1:7897"    # 日常出口（mixed-port）
 homebb_proxy = "http://127.0.0.1:7901"   # 家宽专用入站口（Merge 里 listeners 指向家宽组的那个）
 
@@ -22,21 +25,24 @@ ip_url = "https://api.ipify.org"
 ai_probe_url = "https://api.openai.com/v1/models"
 ai_hosts = ["openai.com", "chatgpt.com"]
 uplink_interface = "en0"
-# 必须绕过 TUN 直连的自家机器（SSH/运维），和 Merge 里 tun.route-exclude-address 保持一致；没有就留空
+# 必须绕过 TUN 直连的自家机器（SSH/运维）；没有就留空。
+# Verge 2.5.5 起以 Verge 自己的 TUN 设置为准：设置 → 虚拟网卡模式（齿轮）→ 排除自定义网段 里要有这些 IP/32
 direct_ips = []
 curl_timeout = 12
 
 [alert]
 title = "Clash 家宽监控"
 realert_secs = 1800                      # 持续非正常时每隔多久再提醒一次
-debounce_codes = ["daily_down", "core_reloading", "clash_dead", "deadchain_broken"]  # 这些状态首次出现先观察一轮（切换配置档时内核重载会短暂触发）
+debounce_codes = ["daily_down", "core_reloading", "clash_dead", "deadchain_broken", "verge_service_failed"]  # 这些状态首次出现先观察一轮（切换配置档时内核重载会短暂触发）
 modal = true                             # 切入非正常时额外弹一个 2 分钟自动消失的模态框
 sound = "Basso"
 telegram_token_env = "TG_TOKEN"          # 两个环境变量都有值才会发 Telegram
 telegram_chat_env = "TG_CHAT"
 
 [lock]
-# watch.py --pin 会给这些文件打 uchg 不可变标记并记录 sha256，每轮校验；为空则不启用
+# watch.py --pin 记录这些文件的 sha256 并每轮校验；为空则不启用。
+# profiles/ 里的文件额外打 uchg 不可变标记；Verge 数据目录下的其它文件（订阅副本）只记 sha256——
+# Verge 2.5.5 服务模式要复制它们，带 uchg 会让服务起不来内核、TUN 开不了
 files = [
   "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/profiles/Merge.yaml",
   "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/profiles/Script.js",
@@ -47,6 +53,8 @@ files = [
 # 出口覆盖规则（route.py）：记忆文件与规则集目录。规则集必须放在 mihomo 数据目录之下
 file = "routes.toml"
 dir = "~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/ai-homebb-rules"
+# 改出口时临时在 127.0.0.1 上把规则集提供给内核拉取的端口，要和 Merge 里 rule-providers 的 url 一致
+serve_port = 7919
 
 [hud]
 tick = 1.5

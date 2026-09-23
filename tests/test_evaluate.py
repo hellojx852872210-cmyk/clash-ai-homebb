@@ -40,6 +40,32 @@ def ev(snap: Snapshot) -> Result:
     return evaluate(snap, POLICY)
 
 
+class VergeServiceTest(unittest.TestCase):
+    """Verge 服务模式失败（内核退回 sidecar）：要报，但不能盖住泄漏。"""
+
+    WHY = "Failed to start owner core: failed to write the runtime asset ai-homebb-providers/a.yaml: Operation not permitted (os error 1)"
+
+    def test_reported_with_hint(self):
+        r = ev(base(verge_error=self.WHY))
+        self.assertEqual((r.code, r.level), ("verge_service_failed", "crit"))
+        self.assertIn("--migrate-lock", r.detail)
+
+    def test_leak_wins(self):
+        r = ev(base(verge_error=self.WHY, homebb_ip=DAILY_IP))
+        self.assertEqual(r.code, "leak_homebb_is_daily")
+
+    def test_clash_dead_explains(self):
+        r = ev(base(clash_up=False, verge_error=self.WHY))
+        self.assertEqual(r.code, "clash_dead")
+        self.assertIn("a.yaml", r.detail)
+
+    def test_direct_route_hint(self):
+        r = ev(base(tun_exclude=()))
+        self.assertEqual(r.code, "direct_route_missing")
+        self.assertIn("排除自定义网段", r.detail)
+        self.assertIn("203.0.113.10/32", r.detail)
+
+
 class EvaluateTest(unittest.TestCase):
     def test_ok_when_homebb_and_daily_differ(self):
         r = ev(base())

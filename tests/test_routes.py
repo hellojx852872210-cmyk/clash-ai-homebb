@@ -164,8 +164,9 @@ class HudChoiceTest(unittest.TestCase):
         import os
         self.work = Path(tempfile.mkdtemp())
         cfg = self.work / "cfg.toml"
-        cfg.write_text(f'[clash]\nsocket = "{self.work}/nope.sock"\ncontroller = ""\n'
+        cfg.write_text(f'[clash]\nsocket = "{self.work}/nope.sock"\ncontroller = ""\nauto_discover = false\n'
                        f'[routes]\nfile = "{self.work}/routes.toml"\ndir = "{self.work}/rules"\n', encoding="utf-8")
+        self.prev_env = os.environ.get("CLASH_AI_HOMEBB_CONFIG")
         os.environ["CLASH_AI_HOMEBB_CONFIG"] = str(cfg)
         import config
         importlib.reload(config)
@@ -178,7 +179,10 @@ class HudChoiceTest(unittest.TestCase):
     def tearDown(self):
         import importlib
         import os
-        os.environ.pop("CLASH_AI_HOMEBB_CONFIG", None)
+        if self.prev_env is None:  # 恢复原值，别让后面的测试读到项目里的真实 config.toml
+            os.environ.pop("CLASH_AI_HOMEBB_CONFIG", None)
+        else:
+            os.environ["CLASH_AI_HOMEBB_CONFIG"] = self.prev_env
         import config
         importlib.reload(config)
         importlib.reload(R)
