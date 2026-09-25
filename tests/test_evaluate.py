@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from watch import Policy, Result, Snapshot, evaluate, should_notify
+from watch import Policy, Result, Snapshot, evaluate, follow_chain, should_notify
 
 DIRECT_IPS = ("203.0.113.10", "203.0.113.11")  # RFC 5737 文档用地址
 POLICY = Policy(direct_ips=DIRECT_IPS, uplink_interface="en0")
@@ -218,3 +218,58 @@ class DailyDownDetailTest(unittest.TestCase):
         r = ev(base(daily_ip=None, homebb_ip=HOMEBB_IP))
         self.assertEqual(r.code, "daily_down")
         self.assertIn("订阅线路", r.detail)
+
+
+class DailyRouteTest(unittest.TestCase):
+    """日常探测不通时，提示写清没设覆盖的流量实际走哪条链、会不会自动切换。"""
+
+    def test_route_bypassing_daily_group_is_called_out(self):
+        route = ("Final", "Proxies", "TW", "台湾节点 1")
+        r = ev(base(daily_ip=None, homebb_ip=HOMEBB_IP, default_route=route))
+        self.assertEqual((r.code, r.level), ("daily_down", "crit"))
+        self.assertIn("Final → Proxies → TW → 台湾节点 1", r.detail)
+        self.assertIn("没经过日常出口", r.detail)
+        self.assertIn("不会自动切换", r.detail)
+        self.assertNotIn("订阅线路", r.detail)  # 不经过订阅，就别怪订阅
+
+    def test_route_through_daily_group_blames_subscription(self):
+        route = ("Final", "Proxies", "日常出口", "日常-自动", "机场A-自动", "香港节点 3")
+        r = ev(base(daily_ip=None, homebb_ip=HOMEBB_IP, default_route=route))
+        self.assertIn("日常出口 → 日常-自动 → 机场A-自动", r.detail)
+        self.assertIn("订阅线路", r.detail)
+        self.assertNotIn("不会自动切换", r.detail)
+
+    def test_bypass_with_homebb_down_still_says_upstream(self):
+        r = ev(base(daily_ip=None, homebb_ip=None, default_route=("Final", "TW", "台湾节点 1")))
+        self.assertIn("没经过日常出口", r.detail)
+        self.assertIn("上行", r.detail)
+
+    def test_daily_group_name_comes_from_policy(self):
+        pol = Policy(direct_ips=DIRECT_IPS, daily_group="Daily")
+        r = evaluate(base(daily_ip=None, homebb_ip=HOMEBB_IP, default_route=("Final", "Daily", "HK 1")), pol)
+        self.assertNotIn("没经过", r.detail)
+
+    def test_route_ignored_when_daily_works(self):
+        r = ev(base(default_route=("Final", "TW", "台湾节点 1")))
+        self.assertEqual(r.code, "ok")
+
+
+class FollowChainTest(unittest.TestCase):
+    PROXIES = {
+        "Final": {"type": "Selector", "now": "Proxies"},
+        "Proxies": {"type": "Selector", "now": "日常出口"},
+        "日常出口": {"type": "Selector", "now": "日常-自动"},
+        "日常-自动": {"type": "Fallback", "now": "机场A-自动"},
+        "机场A-自动": {"type": "URLTest", "now": "香港 3"},
+        "香港 3": {"type": "Shadowsocks"},
+    }
+
+    def test_walks_down_to_the_real_node(self):
+        self.assertEqual(follow_chain(self.PROXIES, "Final"),
+                         ("Final", "Proxies", "日常出口", "日常-自动", "机场A-自动", "香港 3"))
+
+    def test_loops_missing_and_empty(self):
+        loop = {"A": {"type": "Selector", "now": "B"}, "B": {"type": "Selector", "now": "A"}}
+        self.assertEqual(follow_chain(loop, "A"), ("A", "B"))
+        self.assertEqual(follow_chain({"A": {"type": "Selector", "now": "gone"}}, "A"), ("A", "gone"))
+        self.assertEqual(follow_chain({}, ""), ())

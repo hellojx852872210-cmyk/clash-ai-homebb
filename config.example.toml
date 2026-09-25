@@ -19,6 +19,7 @@ homebb_group_type = "Fallback"           # 家宽组类型（mihomo API 里的�
 homebb_members = ["RESIP-A", "RESIP-B"]  # 家宽入口节点名；家宽来自订阅 provider 时留空 []
 homebb_member_type = "Vless"             # mihomo API 里这些节点的 type；留空 "" 不检查
 homebb_markers = ["Claude-Only", "RESIP-Claude"]  # 悬浮窗把链路里含这些名字的连接算作家宽
+daily_group = "日常出口"                  # 日常流量该走的组（自动切换订阅）；默认出口没经过它时监控会点名
 
 [probe]
 ip_url = "https://api.ipify.org"

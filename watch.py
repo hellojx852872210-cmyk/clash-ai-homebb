@@ -53,7 +53,7 @@ CODE_CN = {
     "config_tampered": "上锁的配置被改或锁标记丢了",
     "direct_route_missing": "自家机直连的 TUN exclude / 网卡路由丢了",
     "verge_service_failed": "Verge 服务模式起不来内核，退回了 sidecar，虚拟网卡(TUN)不可用",
-    "daily_down": "日常出口出不了网（所有订阅都不通）",
+    "daily_down": "日常流量出不了网",
 }
 CODE_SHORT = {
     "ok": "正常",
@@ -66,7 +66,7 @@ CODE_SHORT = {
     "config_tampered": "配置被改/锁标记丢",
     "direct_route_missing": "自家机直连路由丢",
     "verge_service_failed": "Verge 服务失败，TUN 不可用",
-    "daily_down": "日常出口断线（订阅全不通）",
+    "daily_down": "日常流量断线",
 }
 
 
@@ -81,6 +81,7 @@ class Policy:
     homebb_member_type: str = "Vless"  # 空 = 不查类型
     direct_ips: tuple[str, ...] = ()
     uplink_interface: str = "en0"
+    daily_group: str = "日常出口"
 
     @classmethod
     def from_settings(cls, s: Settings) -> "Policy":
@@ -92,6 +93,7 @@ class Policy:
             homebb_member_type=s.deadchain.homebb_member_type,
             direct_ips=tuple(s.probe.direct_ips),
             uplink_interface=s.probe.uplink_interface,
+            daily_group=s.deadchain.daily_group,
         )
 
 
@@ -118,6 +120,7 @@ class Snapshot:
     lock_ok: bool = True
     lock_detail: str = ""
     verge_error: str = ""  # Verge 日志里服务启动内核失败的原因（内核不在服务模式时才有）
+    default_route: tuple[str, ...] = ()  # 日常探测不通时才查：没设覆盖的流量（MATCH）实际走的链路
 
 
 @dataclass(frozen=True)
@@ -208,8 +211,15 @@ def evaluate(snapshot: Snapshot, policy: Policy | None = None) -> Result:
         return Result("direct_route_missing", "crit", detail)
     if not snapshot.daily_ip:
         # 家宽走的是另一条入口。它还通 → 机场线路的事；它也不通 → 多半是本机上行断了
-        return Result("daily_down", "crit",
-                      "家宽仍通，是订阅线路的问题" if snapshot.homebb_ip else "家宽也不通，多半是本机上行断了")
+        cause = "家宽仍通，是订阅线路的问题" if snapshot.homebb_ip else "家宽也不通，多半是本机上行断了"
+        route = snapshot.default_route
+        if route and p.daily_group not in route:
+            # 默认出口被选到了别处（比如 Proxies 选了某个固定节点）：不通的是那个节点，而且它挂了不会自动切换
+            upstream = "家宽仍通" if snapshot.homebb_ip else "家宽也不通，多半是本机上行断了"
+            cause = f"当前走 {' → '.join(route)}，没经过{p.daily_group}，挂了不会自动切换；{upstream}"
+        elif route:
+            cause = f"当前走 {' → '.join(route)}；{cause}"
+        return Result("daily_down", "crit", cause)
     if not snapshot.homebb_ip:
         return Result("homebb_down", "warn")
     return Result("ok", "ok", f"家宽 {snapshot.homebb_ip} / 日常 {snapshot.daily_ip}")
@@ -378,6 +388,33 @@ def ai_chain_from_connections() -> str | None:
     return None
 
 
+GROUP_TYPES = frozenset({"Selector", "URLTest", "Fallback", "LoadBalance", "Relay"})
+
+
+def follow_chain(proxies: dict, start: str, limit: int = 8) -> tuple[str, ...]:
+    """从一个组顺着每层当前选择往下走到真实节点：Final → Proxies → TW → 台湾节点。"""
+    chain: list[str] = []
+    name = start
+    while name and name not in chain and len(chain) < limit:
+        chain.append(name)
+        node = proxies.get(name) or {}
+        if node.get("type") not in GROUP_TYPES:
+            break
+        name = str(node.get("now") or "")
+    return tuple(chain)
+
+
+def default_route(proxies: dict) -> tuple[str, ...]:
+    """没设覆盖的流量（最后那条 MATCH 规则）实际走的链路。规则表有几千条，只在日常探测不通时才查。"""
+    try:
+        rules = api_json("/rules", timeout=8).get("rules") or []
+    except Exception:
+        return ()
+    target = next((str(r.get("proxy") or "") for r in reversed(rules)
+                   if str(r.get("type") or "").lower() == "match"), "")
+    return follow_chain(proxies, target) if target else ()
+
+
 def probe(policy: Policy | None = None) -> Snapshot:
     p = policy or DEFAULT_POLICY
     c = SETTINGS.clash
@@ -389,6 +426,7 @@ def probe(policy: Policy | None = None) -> Snapshot:
     hb_type = ""
     hb_all: tuple[str, ...] = ()
     hb_member_types: tuple[str, ...] = ()
+    proxies: dict = {}
     if clash_up:
         try:
             configs = api_json("/configs")
@@ -412,6 +450,7 @@ def probe(policy: Policy | None = None) -> Snapshot:
     direct_ifaces = {ip: route_iface(ip) for ip in p.direct_ips}
     daily_ip = curl_ip(c.daily_proxy) if clash_up else None
     homebb_ip = curl_ip(c.homebb_proxy) if clash_up else None
+    route = default_route(proxies) if clash_up and not daily_ip else ()
     ai_via = "fail_closed"
     chain = None
     if clash_up:
@@ -436,6 +475,7 @@ def probe(policy: Policy | None = None) -> Snapshot:
         lock_ok=lock_ok,
         lock_detail=lock_detail,
         verge_error=verge_error,
+        default_route=route,
     )
 
 

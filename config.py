@@ -47,6 +47,8 @@ class DeadchainCfg:
     homebb_member_type: str = "Vless"
     # 悬浮窗：连接链路里出现这些名字就归为「家宽」
     homebb_markers: tuple[str, ...] = ("Claude-Only", "RESIP-Claude")
+    # 日常流量（非 AI、没设覆盖）该走的组，和生成器的 daily_group 一致。监控靠它判断默认出口有没有自动切换
+    daily_group: str = "日常出口"
 
 
 @dataclass(frozen=True)
