@@ -186,7 +186,9 @@ def evaluate(snapshot: Snapshot, policy: Policy | None = None) -> Result:
     if missing:
         return Result("direct_route_missing", "crit", "; ".join(missing))
     if not snapshot.daily_ip:
-        return Result("daily_down", "crit")
+        # 家宽走的是另一条入口。它还通 → 机场线路的事；它也不通 → 多半是本机上行断了
+        return Result("daily_down", "crit",
+                      "家宽仍通，是订阅线路的问题" if snapshot.homebb_ip else "家宽也不通，多半是本机上行断了")
     if not snapshot.homebb_ip:
         return Result("homebb_down", "warn")
     return Result("ok", "ok", f"家宽 {snapshot.homebb_ip} / 日常 {snapshot.daily_ip}")
@@ -210,8 +212,11 @@ def clash_reachable() -> bool:
     return bool((c.socket and os.path.exists(c.socket)) or c.controller)
 
 
-def api_json(path: str, timeout: float = 5.0) -> Any:
-    """GET mihomo 控制器；unix socket 优先，其次 TCP controller（带 secret）。"""
+def api_json(path: str, timeout: float = 5.0, method: str = "GET") -> Any:
+    """请求 mihomo 控制器；unix socket 优先，其次 TCP controller（带 secret）。
+
+    空响应体（例如 PUT /providers/rules/<name> 的 204）返回 None。
+    """
     c = SETTINGS.clash
     headers = {}
     if c.socket and os.path.exists(c.socket):
@@ -224,12 +229,13 @@ def api_json(path: str, timeout: float = 5.0) -> Any:
     else:
         raise RuntimeError("没有可用的 mihomo 控制器（clash.socket / clash.controller 都为空）")
     try:
-        conn.request("GET", path, headers=headers)
+        conn.request(method, path, headers=headers)
         resp = conn.getresponse()
         body = resp.read()
-        if resp.status != 200:
+        if resp.status >= 300:
             raise RuntimeError(f"{path} HTTP {resp.status}")
-        return json.loads(body.decode())
+        text = body.decode().strip()
+        return json.loads(text) if text else None
     finally:
         conn.close()
 

@@ -314,7 +314,8 @@ def guide(st: dict) -> int:
     ui.title("完成")
     print(render(detect()))
     print()
-    ui.note("以后：python3 watch.py 看一轮；python3 wizard.py 增删节点或订阅后重新生成并安装（先 --unpin，装完 --pin）。")
+    ui.note("以后：python3 watch.py 看一轮；python3 route.py 把某个 App 改到家宽/直连/代理；")
+    ui.note("      python3 wizard.py 增删节点或订阅后重新生成并安装（先 --unpin，装完 --pin）。")
     return 0
 
 

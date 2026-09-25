@@ -178,3 +178,17 @@ class NotifyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DailyDownDetailTest(unittest.TestCase):
+    """日常出口断了的时候，要能一眼看出是本机上行断还是订阅线路断。"""
+
+    def test_says_upstream_when_homebb_also_down(self):
+        r = ev(base(daily_ip=None, homebb_ip=None))
+        self.assertEqual(r.code, "daily_down")
+        self.assertIn("上行", r.detail)
+
+    def test_says_subscription_when_homebb_alive(self):
+        r = ev(base(daily_ip=None, homebb_ip=HOMEBB_IP))
+        self.assertEqual(r.code, "daily_down")
+        self.assertIn("订阅线路", r.detail)

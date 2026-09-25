@@ -24,6 +24,7 @@ Claude / ChatGPT / Grok 这类服务对出口 IP 很敏感，机房 IP 容易被
 | 告警 | 只走本机：状态切换弹通知 + 模态框，持续故障每 30 分钟再提醒，抖动先观察一轮 |
 | 悬浮窗 | 前台 App 的连接走了哪里：家宽 / 日常 / 直连 / 混合（混合时逐条标注） |
 | 锁 | `--pin` 给 Merge / Script / 订阅副本打 `uchg` 不可变标记并记 sha256；改了或标记丢了立刻告警 |
+| 改出口 | 点一下悬浮窗，或用 `route.py`，把某个 App / 域名改成家宽、直连或代理，记住并立刻生效 |
 
 ## 快速开始
 
@@ -66,6 +67,60 @@ python3 wizard.py generate            # 只写到 generated/；加 --install --y
 
 改了 `deadchain.toml` 就重新生成；生成器默认只写到 `generated/`，加 `--install --yes` 才会覆盖 Verge 里的 Merge / Script（原文件备份）。
 
+## 改某个 App 的出口
+
+默认分流之外，想把某个 App 或域名单独摆到别的出口：
+
+**最省事的办法：点悬浮窗。** 悬浮窗显示的就是当前前台 App 的出口，点它一下会展开三个按钮：
+
+```
+Google Chrome
+现在 日常 · 选新出口
+[家宽] [直连] [代理]
+[清除覆盖] [取消]
+```
+
+选一个即可，新连接立刻按新出口走；12 秒不操作自动收起。拖动悬浮窗仍然照旧（按住移动即可，只有「点一下不移动」才会展开）。
+GUI App 按它的程序包路径匹配，所以浏览器的各种 Helper 进程会一起跟着改。
+
+也可以用命令：
+
+```bash
+python3 route.py                      # 列出正在联网的 App 和它当前走的出口，选一个改
+python3 route.py set Telegram 家宽     # 也可以直接指定
+python3 route.py set github.com 直连
+python3 route.py set 203.0.113.9 代理
+python3 route.py list                 # 已记住的覆盖
+python3 route.py remove Telegram      # 取消，恢复默认分流
+python3 route.py status               # 现在谁走哪
+```
+
+改动记在 `routes.toml`，同时渲染成三个 mihomo 规则集文件（`ai-homebb-rules/user-{homebb,direct,daily}.yaml`）。
+mihomo 直接重读这三个文件，所以**不用解锁 Merge.yaml、不用重载整份配置、不会断开已有连接**，命令返回后新连接就按新出口走。
+重新生成配置时覆盖规则不会丢（`genconfig.py` 从 `routes.toml` 重新渲染）。
+
+三条 `RULE-SET` 规则排在 AI 死链规则之后，所以**覆盖规则改不动 AI 的出口**：把 `claude.ai` 设成直连会被直接拒绝，
+就算手改规则集文件塞进去也不会生效（实测如此）。这是有意的，死链优先。
+
+手工写 Merge.yaml 的人第一次要装一下规则集钩子：`python3 route.py hook` 会打印要贴的片段；用 `genconfig.py` 生成配置的不用管，生成器已经带上。
+
+## 桌面 App
+
+不想记命令，就包成一个能双击的 App：
+
+```bash
+./scripts/build-app.sh          # 生成「家宽选择器.app」并装进 /Applications（--no-install 只生成到 dist/）
+```
+
+打开后一个窗口看全：当前判级、家宽 / 日常出口 IP、AI 链路、配置锁、上次检查时间。
+下面两个开关分别管监控和悬浮窗；右下「一键启用」全部打开（都开着时变成「全部停用」），「立即检查」马上跑一轮。
+
+- 开关直接操作 launchd：停用 = `bootout` + `disable`，下次登录也不会自己起来；启用 = `enable` + `bootstrap`，还没装过就按 `launchd/` 模板现装。
+- **停用不改 Clash 配置，AI 仍然只走家宽**，只是没人盯、没悬浮窗了；监控停着时顶部会标明「这是停用前最后一次的结果」。
+- 按 plist 里的脚本路径认任务，不按 label：早先手装、label 不同的任务也能管，不会再装出第二份（两份悬浮窗会互相杀）。
+- App 里只有启动脚本和图标，代码从本项目目录跑：改代码不用重装，挪了项目目录重跑一次 `build-app.sh`。
+- 命令行等价：`python3 agents.py [status|enable|disable] [watch|float]`，`python3 panel.py --summary` 打印面板内容。
+
 ## 本地验收
 
 改了向导或生成器之后，不必碰真实配置就能完整过一遍：
@@ -85,6 +140,7 @@ python3 watch.py                # 跑一轮，打印判级
 python3 watch.py --json         # 完整快照
 python3 watch.py --print-config # 生效配置
 python3 watch.py --unpin        # 解锁 → 改配置 → 重新生成/粘贴 → python3 watch.py --pin
+python3 agents.py               # 监控 / 悬浮窗任务的状态；enable / disable 启停
 ./uninstall.sh                  # 卸载 launchd 任务
 ```
 
@@ -93,7 +149,7 @@ python3 watch.py --unpin        # 解锁 → 改配置 → 重新生成/粘贴 �
 ## 要求
 
 - macOS（launchd、`chflags uchg`、`osascript`、AppKit）
-- Python 3.11+（`tomllib`）；悬浮窗额外需要 `pip install pyobjc-framework-Cocoa`
+- Python 3.11+（`tomllib`）；悬浮窗和桌面 App 额外需要 `pip install pyobjc-framework-Cocoa`
 - Clash Verge Rev（用它的 unix socket 控制器；其它 mihomo 客户端可在 `config.toml` 里改成 TCP controller + secret）
 - `curl`
 
@@ -104,21 +160,28 @@ python3 watch.py --unpin        # 解锁 → 改配置 → 重新生成/粘贴 �
 - 浏览器自带 DoH + ECH 会让 SNI 变成 `cloudflare-ech.com`，域名规则匹配不到；系统代理模式下浏览器把域名交给 Clash 所以没问题，TUN 模式下建议关掉浏览器的 Secure DNS。
 - 悬浮窗按进程归属连接，终端类 App 会把子进程（如 CLI 工具）一并算进去。
 - provider 文件必须放在 mihomo 的数据目录之下（安全路径限制），生成器和安装说明已按此处理。
+- 用 python.org 安装包的 Python 跑的任务，归系统设置「登录项与扩展 → 允许在后台」里的「Python Software Foundation」开关管；
+  它关着时开机不会自动启动（手动启用能跑，重启又没了），监控和悬浮窗的 plist 里最好用 Homebrew 的 Python。
 
 ## 目录
 
 ```
 start.py                环境检测 + 全程引导（第一次运行这个）
 wizard.py                增删家宽与订阅（菜单 / 命令行）
+route.py                 看当前出口、把某个 App/域名改到家宽/直连/代理，并记住
+routes.py                覆盖规则的数据模型与规则集渲染
 genconfig.py            生成 Merge.yaml / Script.js / providers / config.toml
 deadchain.example.toml  生成器输入示例
 templates/Script.js.tpl Script 模板
 watch.py                监控 + 锁（launchd 每 3 分钟）
 float.py                悬浮窗
+panel.py                桌面控制面板（scripts/build-app.sh 包成「家宽选择器.app」）
+agents.py               监控 / 悬浮窗 launchd 任务的查看、启用、停用
 egress.py               连接表 → 出口摘要
 config.py               config.toml 加载
 config.example.toml     监控配置示例
 launchd/ install.sh uninstall.sh
+scripts/                build-app.sh 打包 App、make_icon.py 画图标、acceptance.sh 本地验收
 tests/                  pytest
 ```
 

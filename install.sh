@@ -33,6 +33,7 @@ render() {  # $1 模板 $2 目标
 }
 load() {  # $1 label $2 plist
   launchctl bootout "gui/$(id -u)/$1" >/dev/null 2>&1 || true
+  launchctl enable "gui/$(id -u)/$1"  # 面板里停用过（launchctl disable）的话，不先 enable 会 bootstrap 失败
   launchctl bootstrap "gui/$(id -u)" "$2"
   echo "已加载 $1"
 }

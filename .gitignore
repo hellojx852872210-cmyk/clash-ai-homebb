@@ -4,6 +4,7 @@ __pycache__/
 # 本机运行产物
 config.toml
 deadchain.toml
+routes.toml
 lock.json
 state.json
 watch.log
@@ -12,6 +13,7 @@ watch.launchd.err
 float.launchd.out
 float.launchd.err
 /generated/
+/dist/
 _refactor-bak/
 *.bak-*
 .DS_Store
