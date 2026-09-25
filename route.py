@@ -131,12 +131,11 @@ def cmd_hook() -> int:
     ui.note("把下面这段合进 Merge.yaml，三条 RULE-SET 必须排在 AI 域名规则之后，其余规则之前。")
     d = R.rules_dir()
     ai = SETTINGS.deadchain.ai_group
+    defs = "\n".join(f"  {name}: {json.dumps(v, ensure_ascii=False)}" for name, v in R.provider_defs().items())
     print(f"""
 proxy-providers 同级加：
 rule-providers:
-  user-homebb: {{type: file, behavior: classical, path: {d}/user-homebb.yaml}}
-  user-direct: {{type: file, behavior: classical, path: {d}/user-direct.yaml}}
-  user-daily:  {{type: file, behavior: classical, path: {d}/user-daily.yaml}}
+{defs}
 
 prepend-rules 里，紧跟在 AI 规则之后：
 - RULE-SET,user-homebb,{ai}
@@ -144,6 +143,8 @@ prepend-rules 里，紧跟在 AI 规则之后：
 - RULE-SET,user-daily,日常出口
 """)
     ui.note(f"规则集文件在 {d}（route.py 会自动建）。Script.js 若过滤 RULE-SET，要放行 user-* 这三条。")
+    ui.note(f"内核按上面的 url 找本项目拉规则：改出口时 route.py / 悬浮窗临时在 127.0.0.1:{SETTINGS.routes.serve_port} 提供文件，"
+            "平时不占端口；监控每轮发现内核里的条数和记忆不一致会自动重推。")
     return 0
 
 

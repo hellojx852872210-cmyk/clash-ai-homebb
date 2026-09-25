@@ -122,11 +122,13 @@ def build(spec: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
     if hb_sub:
         providers["homebb-sub"] = provider("homebb", hb_sub, "[home] ")
 
-    # 出口覆盖规则集：三个 classical 文件 provider，内容由 route.py / routes.toml 维护
-    rule_providers = {
-        name: {"type": "file", "behavior": "classical", "path": f"./{RULES_SUBDIR}/{name}.yaml"}
-        for name in ("user-homebb", "user-direct", "user-daily")
-    }
+    # 出口覆盖规则集：三个 classical http provider（改动时由本项目临时在本机提供，见 routes.provider_defs），
+    # 内容由 route.py / routes.toml 维护
+    sys.path.insert(0, str(HERE))
+    import routes as _routes
+
+    serve_port = _routes.SETTINGS.routes.serve_port
+    rule_providers = _routes.provider_defs(serve_port)
 
     ai = spec.get("ai") or {}
     domains = list(ai.get("domains") or DEFAULT_AI_DOMAINS)
@@ -251,6 +253,7 @@ def build(spec: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
         "",
         "[routes]",
         f"dir = {j(f'{verge}/{RULES_SUBDIR}')}",
+        f"serve_port = {serve_port}",
         "",
     ])
 
@@ -264,11 +267,12 @@ def build(spec: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
 4. 把 `config.toml` 放到本项目目录，然后 `python3 watch.py --pin` 上锁，`./install.sh` 装监控和悬浮窗。
 5. 验证：`curl -x http://127.0.0.1:{port} https://api.ipify.org` 应返回家宽 IP；`python3 watch.py` 应打印「正常」。
 """
+    if direct_ips:
+        install_md += f"""6. 自家机直连：Verge 2.5.5 起 Merge 里的 `tun.route-exclude-address` 会被 Verge 自己的 TUN 设置盖掉，
+   到「设置 → 虚拟网卡模式（齿轮）→ 排除自定义网段」加上 `{",".join(f"{ip}/32" for ip in direct_ips)}`。
+"""
     files = {"Merge.yaml": merge, "Script.js": script, "config.toml": cfg, "INSTALL.md": install_md}
     try:
-        sys.path.insert(0, str(HERE))
-        import routes as _routes
-
         saved = _routes.load_routes()
         for t in _routes.TARGETS:
             files[f"{RULES_SUBDIR}/{_routes.PROVIDER[t]}.yaml"] = _routes.render_payload(saved, t)
@@ -307,8 +311,13 @@ def install(out: Path, verge: Path, project: Path) -> None:
     pdir = verge / PROVIDERS_SUBDIR
     pdir.mkdir(exist_ok=True)
     for f in (out / PROVIDERS_SUBDIR).glob("*.yaml"):
-        shutil.copy2(f, pdir / f.name)
-        print(f"已写 {pdir / f.name}")
+        dst = pdir / f.name
+        # 订阅副本不能带 uchg：Verge 2.5.5 服务模式要把它复制进 runtime 目录（见 verge.py）。
+        # 旧版本项目给它上过锁，这里解开；用 copyfile 而不是 copy2，免得把源文件的标记也抄过来。
+        if dst.exists() and getattr(dst.stat(), "st_flags", 0) & getattr(_stat, "UF_IMMUTABLE", 0):
+            os.chflags(dst, dst.stat().st_flags & ~_stat.UF_IMMUTABLE)
+        shutil.copyfile(f, dst)
+        print(f"已写 {dst}")
     rdir = verge / RULES_SUBDIR
     rdir.mkdir(exist_ok=True)
     for f in (out / RULES_SUBDIR).glob("*.yaml"):

@@ -374,11 +374,11 @@ def run_hud() -> None:
                     shared["text"], shared["color"] = "出口窗异常", "mixed"
             if n % 10 == 0:  # 覆盖规则集装没装，后台顺手查，点击时就不用等网络了
                 try:
-                    with lock:
-                        shared["hook"] = R.hook_installed(timeout=1.5)
+                    hook = R.hook_installed(timeout=1.5)  # 可能要重新找控制器，别占着锁
                 except Exception:
-                    with lock:
-                        shared["hook"] = None
+                    hook = None
+                with lock:
+                    shared["hook"] = hook
             n += 1
             time.sleep(TICK)
 

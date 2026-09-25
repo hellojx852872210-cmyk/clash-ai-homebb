@@ -12,7 +12,10 @@ echo "隔离目录：$WORK"
 echo
 
 echo "== 1/4 单元测试 =="
-if "$PY" -c "import pytest" 2>/dev/null; then "$PY" -m pytest -q; else echo "（没有 pytest，用标准库 unittest）"; "$PY" -m unittest discover -s tests; fi
+# 标准库 unittest 不读 tests/conftest.py，这里显式给隔离配置：不碰本机真实的 Clash
+printf '[clash]\nauto_discover = false\n[routes]\nfile = "%s/t-routes.toml"\ndir = "%s/t-rules"\n' "$WORK" "$WORK" > "$WORK/test.toml"
+if "$PY" -c "import pytest" 2>/dev/null; then CLASH_AI_HOMEBB_CONFIG="$WORK/test.toml" "$PY" -m pytest -q
+else echo "（没有 pytest，用标准库 unittest）"; CLASH_AI_HOMEBB_CONFIG="$WORK/test.toml" "$PY" -m unittest discover -s tests; fi
 echo
 
 echo "== 2/4 命令行增删 + 生成 =="
@@ -34,7 +37,8 @@ assert c["deadchain"]["homebb_members"] == ["家宽B"]
 print("产物校验通过")
 PYEOF
 echo "— 出口覆盖 route.py（只写隔离目录，不碰 Clash）—"
-printf '[routes]\nfile = "%s/routes.toml"\ndir = "%s/rules"\n' "$WORK" "$WORK" > "$WORK/route.toml"
+# auto_discover = false：不许找到本机真实的 Clash，免得把测试规则推进用户正在用的内核
+printf '[clash]\nauto_discover = false\n[routes]\nfile = "%s/routes.toml"\ndir = "%s/rules"\n' "$WORK" "$WORK" > "$WORK/route.toml"
 export CLASH_AI_HOMEBB_CONFIG="$WORK/route.toml"
 "$PY" route.py set Telegram 家宽 >/dev/null
 "$PY" route.py set github.com 直连 >/dev/null
@@ -66,11 +70,13 @@ def block(key):
         if on and l.startswith("- "): items.append(json.loads(l[2:]))
         elif on and not l.startswith(" "): on = False
     return items
-prov = {}
+prov, rp = {}, {}
 for l in lines:
     if l.startswith('  "sub-') or l.startswith('  "homebb-sub"'):
         k, v = l.strip().split(": ", 1); prov[json.loads(k)] = json.loads(v)
-cfg = {"mixed-port": 17899, "mode": "rule", "log-level": "silent", "proxy-providers": prov,
+    elif l.startswith('  "user-'):
+        k, v = l.strip().split(": ", 1); rp[json.loads(k)] = json.loads(v)
+cfg = {"mixed-port": 17899, "mode": "rule", "log-level": "silent", "proxy-providers": prov, "rule-providers": rp,
        "proxies": block("prepend-proxies"), "proxy-groups": block("prepend-proxy-groups"),
        "rules": block("prepend-rules") + ["MATCH,DIRECT"]}
 (home / "config.yaml").write_text(json.dumps(cfg, ensure_ascii=False))  # JSON 即 YAML
@@ -79,7 +85,7 @@ PYEOF
 fi
 echo
 
-if [[ "${1:-}" == "--auto" ]]; then echo "自动部分完成。隔离目录：$WORK"; exit 0; fi
+if [[ "${1:-}" == "--auto" ]]; then echo "自动部分完成。隔离目录：${WORK}"; exit 0; fi
 
 echo "== 3/4 交互验收（在隔离配置上操作，随便试）=="
 cat <<'TXT'
@@ -98,4 +104,4 @@ echo
 echo "== 4/4 退出后的最终状态 =="
 "$PY" wizard.py list
 echo
-echo "验收完成。隔离目录：$WORK（不需要可删）。你的真实 deadchain.toml / generated/ / Clash 配置未被触碰。"
+echo "验收完成。隔离目录：${WORK}（不需要可删）。你的真实 deadchain.toml / generated/ / Clash 配置未被触碰。"

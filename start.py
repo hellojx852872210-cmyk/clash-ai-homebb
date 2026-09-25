@@ -19,10 +19,11 @@ from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import verge  # noqa: E402
 from config import SETTINGS, expand_path  # noqa: E402
 
 VERGE_APP = Path("/Applications/Clash Verge.app")
-VERGE_DIR = expand_path("~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev")
+VERGE_DIR = expand_path(SETTINGS.clash.verge_dir)
 SPEC = Path(os.environ.get("CLASH_AI_HOMEBB_SPEC") or HERE / "deadchain.toml")
 LABEL_WATCH = "io.github.clash-ai-homebb.watch"
 LABEL_FLOAT = "io.github.clash-ai-homebb.float"
@@ -76,13 +77,21 @@ def detect() -> dict:
     st["curl"] = shutil.which("curl") is not None
     st["verge_app"] = VERGE_APP.exists()
     st["verge_dir"] = (VERGE_DIR / "profiles").is_dir()
-    sock = SETTINGS.clash.socket
-    st["core_running"] = bool(sock and os.path.exists(sock)) or bool(SETTINGS.clash.controller and _tcp_open(SETTINGS.clash.controller))
     st["core_version"] = ""
+    st["controller"] = ""
     st["tun"] = None
-    if st["core_running"]:
+    try:
+        from watch import api_json, find_controller
+        ctl = find_controller()
+    except Exception:
+        ctl = None
+    st["core_running"] = ctl is not None
+    st["verge_error"] = verge.service_failure(verge.read_log_tail(VERGE_DIR))
+    if ctl is not None:
+        st["controller"] = ctl.label()
+        if ctl.is_service:
+            st["verge_error"] = ""  # 内核就在服务模式，日志里的失败是旧事
         try:
-            from watch import api_json
             st["core_version"] = str(api_json("/version").get("version", ""))
             st["tun"] = bool(api_json("/configs").get("tun", {}).get("enable"))
         except Exception:
@@ -152,7 +161,9 @@ def render(st: dict) -> str:
     L.append("")
     L.append(ui.bold("  Clash Verge Rev"))
     row(st["verge_app"], "已安装", str(VERGE_APP), "去 github.com/clash-verge-rev/clash-verge-rev/releases 下载")
-    row(st["core_running"], "内核在跑", f"mihomo {st['core_version']}".strip(), "打开 Clash Verge 并启动内核")
+    row(st["core_running"], "内核在跑", f"mihomo {st['core_version']}  {st.get('controller', '')}".strip(), "打开 Clash Verge 并启动内核")
+    if st.get("verge_error"):
+        row(False, "服务模式启动内核", "", f"{st['verge_error'][:120]}；{verge.failure_hint(st['verge_error'])}")
     row(st["tun"], "TUN 模式", "", "设置里打开，按进程分流需要它")
     row(st["system_proxy"], "系统代理", "", "设置里打开，浏览器会把域名交给 Clash")
     row(st["daily_port"], f"日常出口 {SETTINGS.clash.daily_proxy}", f"出口 IP {st['daily_ip']}" if st["daily_ip"] else "端口在，暂时拨不通", "端口没开")
@@ -185,6 +196,8 @@ def plan(st: dict) -> list[tuple[str, str]]:
         return [("stop", "先安装 Clash Verge Rev：https://github.com/clash-verge-rev/clash-verge-rev/releases ，导入你的机场订阅后再回来")]
     if not st["core_running"]:
         steps.append(("core", "打开 Clash Verge，确认内核已启动（设置里开 TUN 模式和系统代理）"))
+    if st.get("verge_error"):
+        steps.append(("service", "Verge 服务模式起不来内核，TUN 用不了：" + verge.failure_hint(st["verge_error"])))
     if not st["spec"]:
         steps.append(("wizard", "添加你的家宽节点/订阅和日常订阅（引导向导）"))
     if not st["generated"] or not st["spec"]:
@@ -202,7 +215,7 @@ def plan(st: dict) -> list[tuple[str, str]]:
 
 # 把细步骤归成人看得懂的几大步：(标题, 一句话说明, 包含的细步骤)
 STAGES: list[tuple[str, str, tuple[str, ...]]] = [
-    ("准备 Clash Verge", "确认内核已经启动，设置里打开 TUN 模式和系统代理。", ("core",)),
+    ("准备 Clash Verge", "确认内核已经启动，设置里打开 TUN 模式和系统代理。", ("core", "service")),
     ("添加家宽和订阅", "打开向导，把你的家宽 IP/节点和平时用的机场订阅记下来。", ("wizard",)),
     ("生成并安装", "按记录生成 Clash 配置，装进 Clash Verge（原文件会备份），再在 Verge 里激活。", ("generate", "install", "activate")),
     ("验证", "看家宽入口的出口 IP 是不是你的家宽，监控跑一轮应为「正常」。", ("verify",)),
@@ -237,6 +250,14 @@ def _do(key: str, st: dict) -> tuple[bool, dict]:
             ui.fail("内核还是没起来。先在 Clash Verge 里处理好，再重跑 python3 start.py")
             return False, st
         ui.success("内核已在运行")
+    elif key == "service":
+        ui.fail("Verge 服务模式起不来内核：" + st["verge_error"][:160])
+        if "Operation not permitted" in st["verge_error"]:
+            ui.note("推荐 y：只解开 Verge 服务要复制的订阅副本上的 uchg，sha256 校验照旧，Merge/Script 仍然上锁")
+            if ui.confirm("迁移配置锁", True):
+                _run([PY, "watch.py", "--migrate-lock"])
+        ui.info("然后在 Clash Verge 里重新打开「虚拟网卡模式」（不行就 设置 → 服务模式 → 重装）")
+        ui.pause("做完按回车")
     elif key == "wizard":
         import wizard
         wizard.menu(SPEC)

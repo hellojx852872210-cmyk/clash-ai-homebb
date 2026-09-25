@@ -23,7 +23,7 @@ Claude / ChatGPT / Grok 这类服务对出口 IP 很敏感，机房 IP 容易被
 | 监控 | 每 3 分钟：家宽口出口 IP ≠ 日常出口 IP、AI 探测不能经日常口走通、组结构未被改、锁未被动、直连路由在 |
 | 告警 | 只走本机：状态切换弹通知 + 模态框，持续故障每 30 分钟再提醒，抖动先观察一轮 |
 | 悬浮窗 | 前台 App 的连接走了哪里：家宽 / 日常 / 直连 / 混合（混合时逐条标注） |
-| 锁 | `--pin` 给 Merge / Script / 订阅副本打 `uchg` 不可变标记并记 sha256；改了或标记丢了立刻告警 |
+| 锁 | `--pin` 给 Merge / Script 打 `uchg` 不可变标记并记 sha256，file 型订阅副本只记 sha256（Verge 服务模式要复制它）；改了或标记丢了立刻告警 |
 | 改出口 | 点一下悬浮窗，或用 `route.py`，把某个 App / 域名改成家宽、直连或代理，记住并立刻生效 |
 
 ## 快速开始
@@ -96,13 +96,17 @@ python3 route.py status               # 现在谁走哪
 ```
 
 改动记在 `routes.toml`，同时渲染成三个 mihomo 规则集文件（`ai-homebb-rules/user-{homebb,direct,daily}.yaml`）。
-mihomo 直接重读这三个文件，所以**不用解锁 Merge.yaml、不用重载整份配置、不会断开已有连接**，命令返回后新连接就按新出口走。
+规则集在 Clash 里是 `http` 型：改动的那一刻本项目在 `127.0.0.1:7919` 临时提供这三个文件，让内核现拉，拉完即关，平时不占端口。
+所以**不用解锁 Merge.yaml、不用重载整份配置、不会断开已有连接**，命令返回后新连接就按新出口走。
+内核重启后读自己的缓存；缓存丢了（例如 Verge 换了运行目录）监控下一轮发现条数不对会自动重推。
 重新生成配置时覆盖规则不会丢（`genconfig.py` 从 `routes.toml` 重新渲染）。
 
 三条 `RULE-SET` 规则排在 AI 死链规则之后，所以**覆盖规则改不动 AI 的出口**：把 `claude.ai` 设成直连会被直接拒绝，
 就算手改规则集文件塞进去也不会生效（实测如此）。这是有意的，死链优先。
 
 手工写 Merge.yaml 的人第一次要装一下规则集钩子：`python3 route.py hook` 会打印要贴的片段；用 `genconfig.py` 生成配置的不用管，生成器已经带上。
+早期版本生成的是 `file` 型规则集，在 Verge 2.5.5 服务模式下改了不生效（内核读的是 Verge 复制过去的副本），
+重新 `python3 genconfig.py deadchain.toml --install --yes` 或按 `route.py hook` 换成新片段即可。
 
 ## 桌面 App
 
@@ -144,13 +148,26 @@ python3 agents.py               # 监控 / 悬浮窗任务的状态；enable / d
 ./uninstall.sh                  # 卸载 launchd 任务
 ```
 
-状态码：`ok` / `homebb_down`（家宽断，AI 已断，未漏）/ `daily_down` / `leak_homebb_is_daily` / `leak_ai_via_daily` / `deadchain_broken` / `config_tampered` / `direct_route_missing` / `clash_dead`。
+状态码：`ok` / `homebb_down`（家宽断，AI 已断，未漏）/ `daily_down` / `leak_homebb_is_daily` / `leak_ai_via_daily` / `deadchain_broken` / `config_tampered` / `direct_route_missing` / `verge_service_failed` / `clash_dead`。
+
+## 升级到 Clash Verge 2.5.5 之后
+
+2.5.5 的服务模式先把配置里引用的 provider 文件复制进自己的 root 目录，再用副本启动内核。老用户可能碰到：
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 开不了虚拟网卡（TUN），Verge 提示服务不可用后自动关掉 TUN；监控报 `verge_service_failed` | 旧版本给订阅副本打了 `uchg`，服务复制时 `Operation not permitted`，内核退回 sidecar | `python3 watch.py --migrate-lock`（只解开这些副本的 uchg，已记的 sha256 不变），再在 Verge 里打开虚拟网卡模式 |
+| 改出口提示「覆盖规则集还是 file 型」 | 内核读的是副本，改源文件不生效 | 重新 `genconfig.py --install --yes`，或按 `route.py hook` 换成 http 型 |
+| 监控报 `direct_route_missing`：自家机「不在 exclude」 | Merge 里的 `tun.route-exclude-address` 被 Verge 自己的 TUN 设置盖掉 | Verge「设置 → 虚拟网卡模式（齿轮）→ 排除自定义网段」加上这些 `IP/32` |
+| 悬浮窗显示「Clash 未开」、监控报 `clash_dead` 但 Clash 明明在跑 | 控制器 socket 换了位置 | 已自动发现，不用在 `config.toml` 里写 socket；旧版本手写过的删掉即可 |
+
+`python3 start.py --check` 会把以上几项一起检出来。
 
 ## 要求
 
 - macOS（launchd、`chflags uchg`、`osascript`、AppKit）
 - Python 3.11+（`tomllib`）；悬浮窗和桌面 App 额外需要 `pip install pyobjc-framework-Cocoa`
-- Clash Verge Rev（用它的 unix socket 控制器；其它 mihomo 客户端可在 `config.toml` 里改成 TCP controller + secret）
+- Clash Verge Rev（控制器自动发现，2.5.2 及更早、2.5.5 服务模式 / sidecar 都支持；其它 mihomo 客户端可在 `config.toml` 里写 TCP controller + secret）
 - `curl`
 
 ## 已知边界
@@ -179,6 +196,7 @@ panel.py                桌面控制面板（scripts/build-app.sh 包成「家�
 agents.py               监控 / 悬浮窗 launchd 任务的查看、启用、停用
 egress.py               连接表 → 出口摘要
 config.py               config.toml 加载
+verge.py                Clash Verge 各版本差异：控制器位置、服务模式失败日志、哪些文件不能上 uchg
 config.example.toml     监控配置示例
 launchd/ install.sh uninstall.sh
 scripts/                build-app.sh 打包 App、make_icon.py 画图标、acceptance.sh 本地验收

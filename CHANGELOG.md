@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- 兼容 Clash Verge 2.5.5（服务模式先把 provider 复制进 root 目录再启动内核）：
+  - 控制器自动发现：依次试 config.toml 里写的、2.5.5 服务模式 `/var/run/clash-verge-service/users/<uid>/verge-mihomo.sock`、
+    Verge config.yaml 的 unix socket、`$TMPDIR/verge-mihomo.sock`、旧版 `/tmp/verge/verge-mihomo.sock`、config.yaml 的 TCP 控制器，
+    以 `/version` 有响应为准（sidecar 退出后留下的死 socket 不再被当成「内核在跑」）；常驻的悬浮窗在 Verge 重启或切换模式后自己重新找，
+    不再误报「Clash 未开」。`[clash] socket` 默认改为空。
+  - 配置锁：Verge 运行配置（clash-verge.yaml）里 file 型 provider 引用的文件（订阅副本）只记 sha256、不再打 uchg——
+    带 uchg 会让服务复制失败、内核退回 sidecar、TUN 开不了。url 订阅的缓存服务不复制，保持原来的锁。
+    新增 `watch.py --migrate-lock`：只解开这些文件的 uchg，不重算已记的 sha256（内容对不上的不动、留给人核对）；
+    `--pin` 也会按新规则上锁。监控发现订阅副本带 uchg 会点名文件并给出修法；`genconfig.py --install` 装订阅副本时也会解开旧锁。
+  - 新状态码 `verge_service_failed`：读 Verge 日志，服务启动内核失败且内核不在服务模式时报出失败原文和修法；`start.py --check` 同步检出。
+  - 出口覆盖规则集改为 `http` 型：改动时在 `127.0.0.1:7919`（`[routes] serve_port`）临时提供文件、PUT 让内核现拉；
+    缓存放 `ai-homebb-rules-cache/`，和源文件分开。file 型在 2.5.5 服务模式下改了不生效，遇到时明确提示重新生成。
+    监控每轮核对：记忆在上次推送后改过、或内核条数和上次推完时不同（例如缓存丢了）就自动重推；没有 routes.toml 时不推，
+    内核认不了的规则不会导致每轮空推。端口被别的程序占着、给的内容不对时中止推送。
+  - `direct_route_missing` 说明 2.5.5 以 Verge 自己的 TUN「排除自定义网段」为准，生成的 INSTALL.md 也加了这一步。
 - 新增桌面 App「家宽选择器」：`scripts/build-app.sh` 把 `panel.py` 包成 .app 装进 /Applications。
   窗口里看判级、家宽 / 日常出口、AI 链路、配置锁和上次检查时间；两个开关分别启停监控和悬浮窗，
   「一键启用」全部打开，「立即检查」马上跑一轮；监控停着时顶部标明结果不再更新。`--snapshot` 不弹窗直接出截图。
