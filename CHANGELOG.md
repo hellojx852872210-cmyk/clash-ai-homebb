@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- 监控：日常探测不通时，提示写出没设覆盖的流量实际走的整条链路；默认出口没经过日常出口（例如 Proxies 选了某个固定节点）时明说「挂了不会自动切换」，不再笼统说「所有订阅都不通」。日常出口组名可在 config.toml 的 `[deadchain] daily_group` 里改。
 - 兼容 Clash Verge 2.5.5（服务模式先把 provider 复制进 root 目录再启动内核）：
   - 控制器自动发现：依次试 config.toml 里写的、2.5.5 服务模式 `/var/run/clash-verge-service/users/<uid>/verge-mihomo.sock`、
     Verge config.yaml 的 unix socket、`$TMPDIR/verge-mihomo.sock`、旧版 `/tmp/verge/verge-mihomo.sock`、config.yaml 的 TCP 控制器，
