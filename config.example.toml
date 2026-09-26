@@ -61,3 +61,19 @@ serve_port = 7919
 tick = 1.5
 stale_secs = 900
 # ai_suffixes / noise_suffixes / terminal_names 也可在这里覆盖，见 config.py 默认值
+
+[guard]
+# 出口守护（guard.py）：定时测日常口和家宽口，不通时分析原因、切到能通的出口
+# AI / 家宽只在家宽组内换节点，绝不切到机场或直连；日常流量也不会被切到家宽或直连
+interval = 5             # 多久测一次没设覆盖的流量（秒）
+homebb_interval = 30     # 多久测一次 AI / 家宽链（秒）；家宽常按流量计费，别测太勤
+confirm_delay = 1        # 不通后隔几秒复测，两次都不通才动手
+cooldown = 60            # 同一个组动过后多久内不再动它
+scan_budget = 10         # 手动组里找候选一轮最多花几秒；没测完下一轮接着测，没测完不跳到上一层
+timeout = 3              # 单次测速超时（秒）
+test_url = "http://www.gstatic.com/generate_204"
+uplink_urls = ["http://captive.apple.com/hotspot-detect.html", "http://www.baidu.com"]  # 直连全不通才怀疑本机断网
+switch_selectors = true  # 手动组选中的出口不通时改选能通的（优先日常出口组）
+unfix_auto = true        # 解开被钉住的自动组；关掉的话被钉住的也不替它重测（mihomo 重测会顺带解开固定）
+reopen_verge = true      # 控制器连不上且 Clash Verge 没在运行时重新打开它
+notify = true

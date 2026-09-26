@@ -31,6 +31,7 @@ AUTO_CHECK_AFTER = 300  # 打开面板时上次检查早于这么多秒，自动
 SERVICE_TEXT = {  # key → (标题, 说明)；顺序即面板里的顺序
     "watch": ("监控", "定时查家宽 / 日常出口和死链，出事弹通知"),
     "float": ("悬浮窗 · 出口选择器", "显示前台 App 走哪个出口，点它就能改"),
+    "guard": ("出口守护 · 自动切换", "出口不通时分析原因，自动切到能通的出口"),
 }
 
 
@@ -278,7 +279,10 @@ def run_panel(icon: str | None = None, snapshot: str | None = None, appearance: 
 
     # ---------- 界面 ----------
     W, PAD = 460, 22
-    H = 452
+    ROW0, ROW_H = 232, 56  # 任务开关：第一行的位置和行高，行数跟着 SERVICE_TEXT 走
+    SEP2 = ROW0 + len(SERVICE_TEXT) * ROW_H + 4  # 开关下面那条分隔线
+    MSG_Y, BTN_Y = SEP2 + 14, SEP2 + 44
+    H = BTN_Y + 60
 
     class FlippedView(NSView):
         def isFlipped(self):
@@ -376,7 +380,7 @@ def run_panel(icon: str | None = None, snapshot: str | None = None, appearance: 
     SVC_KEYS = list(SERVICE_TEXT)
     svc_widgets = {}
     for i, key in enumerate(SVC_KEYS):
-        y = 232 + i * 56
+        y = ROW0 + i * ROW_H
         name, sub = SERVICE_TEXT[key]
         label(name, NSMakeRect(PAD, y, 190, 20), 14.5, NSFontWeightSemibold)
         label(sub, NSMakeRect(PAD, y + 23, W - 2 * PAD - 60, 16), 11.5, color=NSColor.secondaryLabelColor())
@@ -391,22 +395,22 @@ def run_panel(icon: str | None = None, snapshot: str | None = None, appearance: 
         sw.setEnabled_(False)
         content.addSubview_(sw)
         svc_widgets[key] = (st_lbl, sw)
-    separator(348)
+    separator(SEP2)
 
     # 底部：提示行 + 按钮
-    spinner = NSProgressIndicator.alloc().initWithFrame_(NSMakeRect(PAD, 363, 16, 16))
+    spinner = NSProgressIndicator.alloc().initWithFrame_(NSMakeRect(PAD, MSG_Y + 1, 16, 16))
     spinner.setStyle_(1)  # NSProgressIndicatorStyleSpinning
     spinner.setControlSize_(1)  # NSControlSizeSmall
     spinner.setDisplayedWhenStopped_(False)
     content.addSubview_(spinner)
-    msg_lbl = label("", NSMakeRect(PAD, 362, W - 2 * PAD, 18), 12, color=NSColor.secondaryLabelColor())
+    msg_lbl = label("", NSMakeRect(PAD, MSG_Y, W - 2 * PAD, 18), 12, color=NSColor.secondaryLabelColor())
     msg_lbl.setLineBreakMode_(4)
 
     check_btn = NSButton.buttonWithTitle_target_action_("立即检查", handler, "check:")
-    check_btn.setFrame_(NSMakeRect(PAD - 6, 392, 116, 36))
+    check_btn.setFrame_(NSMakeRect(PAD - 6, BTN_Y, 116, 36))
     content.addSubview_(check_btn)
     primary = NSButton.buttonWithTitle_target_action_("一键启用", handler, "primary:")
-    primary.setFrame_(NSMakeRect(W - PAD - 150 + 6, 392, 150, 36))
+    primary.setFrame_(NSMakeRect(W - PAD - 150 + 6, BTN_Y, 150, 36))
     primary.setEnabled_(False)
     content.addSubview_(primary)
     try:
@@ -475,7 +479,7 @@ def run_panel(icon: str | None = None, snapshot: str | None = None, appearance: 
         else:
             line, color, spin = "", "info", False
         setv("spin", spin, lambda on: spinner.startAnimation_(None) if on else spinner.stopAnimation_(None))
-        setv("msg_x", spin, lambda on: msg_lbl.setFrame_(NSMakeRect(PAD + (22 if on else 0), 362, W - 2 * PAD - 22, 18)))
+        setv("msg_x", spin, lambda on: msg_lbl.setFrame_(NSMakeRect(PAD + (22 if on else 0), MSG_Y, W - 2 * PAD - 22, 18)))
         setv("msg", line, msg_lbl.setStringValue_)
         setv("msgc", color, lambda c: msg_lbl.setTextColor_(
             {"ok": NSColor.systemGreenColor(), "err": NSColor.systemRedColor()}.get(c, NSColor.secondaryLabelColor())))
