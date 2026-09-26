@@ -118,6 +118,25 @@ class HudCfg:
 
 
 @dataclass(frozen=True)
+class GuardCfg:
+    # 出口守护（guard.py）：定时测日常口和家宽口，不通时分析原因、切到能通的出口。
+    # AI / 家宽只在家宽组内换节点，绝不切到机场或直连；日常流量也不会被切到家宽或直连。
+    interval: float = 5.0           # 多久测一次没设覆盖的流量（秒）
+    homebb_interval: float = 30.0   # 多久测一次 AI / 家宽链（秒）；家宽常按流量计费，别测太勤
+    confirm_delay: float = 1.0      # 第一次不通后隔多久复测；两次都不通才动手，网络抖一下不误切
+    cooldown: float = 60.0          # 同一个组动过之后多久内不再动它，防来回切
+    scan_budget: float = 10.0       # 手动组里找候选一轮最多花几秒；没测完下一轮接着测，没测完不跳到上一层
+    timeout: float = 3.0            # 单次测速超时（秒）：正常节点几百毫秒就回，死链要等满它才算不通
+    test_url: str = "http://www.gstatic.com/generate_204"
+    # 判断本机上行：直连访问这些地址，全都不通、另一条链也不通，才怀疑本机断网（只是怀疑，照样试备选）
+    uplink_urls: tuple[str, ...] = ("http://captive.apple.com/hotspot-detect.html", "http://www.baidu.com")
+    switch_selectors: bool = True   # 手动组选中的出口不通时，改选能通的（优先日常出口组）
+    unfix_auto: bool = True         # 自动组（url-test / fallback）被钉住时解开；关掉的话被钉住的也不替它重测（mihomo 重测会顺带解开）
+    reopen_verge: bool = True       # 控制器连不上且 Clash Verge 没在运行时，把它重新打开
+    notify: bool = True             # 自动处理后发系统通知
+
+
+@dataclass(frozen=True)
 class Settings:
     clash: ClashCfg = field(default_factory=ClashCfg)
     deadchain: DeadchainCfg = field(default_factory=DeadchainCfg)
@@ -126,6 +145,7 @@ class Settings:
     lock: LockCfg = field(default_factory=LockCfg)
     routes: RoutesCfg = field(default_factory=RoutesCfg)
     hud: HudCfg = field(default_factory=HudCfg)
+    guard: GuardCfg = field(default_factory=GuardCfg)
     config_path: str = ""
 
 
@@ -184,6 +204,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         lock=_build(LockCfg, data.get("lock")),
         routes=_build(RoutesCfg, data.get("routes")),
         hud=_build(HudCfg, data.get("hud")),
+        guard=_build(GuardCfg, data.get("guard")),
         config_path=str(p) if p else "",
     )
 

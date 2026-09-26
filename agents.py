@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""监控（watch）和悬浮窗（float）两个 launchd 任务的查看、启用、停用。panel.py 用它，也能单独跑：
+"""监控（watch）、悬浮窗（float）、出口守护（guard）这几个 launchd 任务的查看、启用、停用。panel.py 用它，也能单独跑：
 
-    python3 agents.py                    # 两个任务的状态
-    python3 agents.py enable [watch|float]
-    python3 agents.py disable [watch|float]
+    python3 agents.py                    # 各任务的状态
+    python3 agents.py enable [watch|float|guard]
+    python3 agents.py disable [watch|float|guard]
 
 按 ProgramArguments 里的脚本路径认任务，不按 label：install.sh 装的 io.github.* 和早先手装的其它 label
 都算同一个服务，不会再装出第二份（两份悬浮窗会互相杀）。
@@ -45,6 +45,7 @@ class Service:
 SERVICES = {
     "watch": Service("watch", "watch.py", "io.github.clash-ai-homebb.watch", "监控", True),
     "float": Service("float", "float.py", "io.github.clash-ai-homebb.float", "悬浮窗", False),
+    "guard": Service("guard", "guard.py", "io.github.clash-ai-homebb.guard", "出口守护", False),
 }
 
 STATE_CN = {

@@ -238,8 +238,8 @@ class UnixHTTPConnection(http.client.HTTPConnection):
         self.sock = sock
 
 
-def _request(ctl: verge.Controller, path: str, timeout: float, method: str) -> Any:
-    headers = {}
+def _request(ctl: verge.Controller, path: str, timeout: float, method: str, body: Any = None) -> Any:
+    headers = {"Content-Type": "application/json"} if body is not None else {}
     if ctl.kind == "unix":
         conn: http.client.HTTPConnection = UnixHTTPConnection(ctl.address, timeout=timeout)
     else:
@@ -248,12 +248,13 @@ def _request(ctl: verge.Controller, path: str, timeout: float, method: str) -> A
         if ctl.secret:
             headers["Authorization"] = f"Bearer {ctl.secret}"
     try:
-        conn.request(method, path, headers=headers)
+        payload = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
+        conn.request(method, path, body=payload, headers=headers)
         resp = conn.getresponse()
-        body = resp.read()
+        raw = resp.read()
         if resp.status >= 300:
             raise RuntimeError(f"{path} HTTP {resp.status}")
-        text = body.decode().strip()
+        text = raw.decode().strip()
         return json.loads(text) if text else None
     finally:
         conn.close()
@@ -304,7 +305,7 @@ def clash_reachable() -> bool:
     return find_controller() is not None
 
 
-def api_json(path: str, timeout: float = 5.0, method: str = "GET") -> Any:
+def api_json(path: str, timeout: float = 5.0, method: str = "GET", body: Any = None) -> Any:
     """请求 mihomo 控制器（自动发现，见 find_controller）。
 
     空响应体（例如 PUT /providers/rules/<name> 的 204）返回 None。
@@ -314,12 +315,12 @@ def api_json(path: str, timeout: float = 5.0, method: str = "GET") -> Any:
         tried = "、".join(x.address for x in controller_candidates()) or "（没有候选）"
         raise RuntimeError(f"连不上 mihomo 控制器，试过：{tried}")
     try:
-        return _request(ctl, path, timeout, method)
+        return _request(ctl, path, timeout, method, body)
     except (OSError, http.client.HTTPException):
         again = find_controller()
         if again is None or again == ctl:
             raise
-        return _request(again, path, timeout, method)
+        return _request(again, path, timeout, method, body)
 
 
 unix_json = api_json  # 兼容旧调用

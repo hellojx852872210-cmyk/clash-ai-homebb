@@ -13,6 +13,9 @@ watch.launchd.out
 watch.launchd.err
 float.launchd.out
 float.launchd.err
+guard.launchd.out
+guard.launchd.err
+guard.lock
 /generated/
 /dist/
 _refactor-bak/

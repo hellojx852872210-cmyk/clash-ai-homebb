@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 安装/更新 launchd 任务：监控（每 3 分钟）+ 悬浮窗（常驻）。只在本用户的 LaunchAgents 里操作，不碰 Clash 配置。
-#   ./install.sh            安装两个任务
-#   ./install.sh --no-hud   只装监控，不装悬浮窗
+# 安装/更新 launchd 任务：监控（每 3 分钟）+ 出口守护（常驻）+ 悬浮窗（常驻）。只在本用户的 LaunchAgents 里操作，不碰 Clash 配置。
+#   ./install.sh            安装全部任务
+#   ./install.sh --no-hud   只装监控和出口守护，不装悬浮窗
 set -euo pipefail
 PROJECT="$(cd "$(dirname "$0")" && pwd)"
 AGENTS="$HOME/Library/LaunchAgents"
@@ -42,6 +42,9 @@ mkdir -p "$AGENTS"
 PY_HUD=""
 render "$PROJECT/launchd/io.github.clash-ai-homebb.watch.plist.in" "$AGENTS/io.github.clash-ai-homebb.watch.plist"
 load io.github.clash-ai-homebb.watch "$AGENTS/io.github.clash-ai-homebb.watch.plist"
+# 出口守护：常驻，出口不通时分析原因并切到能通的出口（AI 只在家宽组内换）
+render "$PROJECT/launchd/io.github.clash-ai-homebb.guard.plist.in" "$AGENTS/io.github.clash-ai-homebb.guard.plist"
+load io.github.clash-ai-homebb.guard "$AGENTS/io.github.clash-ai-homebb.guard.plist"
 
 if [[ $WITH_HUD -eq 1 ]]; then
   PY_HUD="$(pick_python_hud)"
